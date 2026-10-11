@@ -1,0 +1,126 @@
+{
+  "cases": [
+    {
+      "name": "hold-is-a-stage",
+      "definition": {"body": {"kind": "stages", "initial_stage": "held", "stages": [{"name": "held", "envelfo": {"kind": "hold", "value": 0.25}}]}},
+      "steps": [
+        {"at": "0", "expected": {"value": 0.25, "weight": 1, "status": "held"}, "runtime": {"stage": "held", "activation": 0}},
+        {"at": "7/3", "restore": true, "expected": {"value": 0.25, "weight": 1, "status": "held"}, "runtime": {"stage": "held", "activation": 0}}
+      ]
+    },
+    {
+      "name": "triangle-quarter-turns",
+      "definition": {"body": {"kind": "cycle", "shape": "triangle", "rate": "1"}},
+      "steps": [
+        {"at": "0", "expected": {"value": -1, "weight": 1, "status": "running"}},
+        {"at": "1/4", "expected": {"value": 0, "weight": 1, "status": "running"}},
+        {"at": "1/2", "restore": true, "expected": {"value": 1, "weight": 1, "status": "running"}},
+        {"at": "3/4", "expected": {"value": 0, "weight": 1, "status": "running"}},
+        {"at": "1", "expected": {"value": -1, "weight": 1, "status": "running"}}
+      ]
+    },
+    {
+      "name": "cycle-delay-and-fade-are-weight",
+      "definition": {"body": {"kind": "cycle", "shape": "square", "rate": "1", "delay": "1/4", "fade_in": "1/2"}},
+      "steps": [
+        {"at": "0", "expected": {"value": 1, "weight": 0, "status": "running"}},
+        {"at": "1/4", "expected": {"value": 1, "weight": 0, "status": "running"}},
+        {"at": "1/2", "expected": {"value": -1, "weight": 0.5, "status": "running"}},
+        {"at": "3/4", "expected": {"value": -1, "weight": 1, "status": "running"}}
+      ]
+    },
+    {
+      "name": "staged-cycle-fade-is-in-value",
+      "definition": {"body": {"kind": "stages", "initial_stage": "wave", "stages": [{"name": "wave", "envelfo": {"kind": "cycle", "shape": "square", "rate": "1", "delay": "1/4", "fade_in": "1/2", "center": 0.25, "depth": 0.5}}]}},
+      "steps": [
+        {"at": "0", "expected": {"value": 0.25, "weight": 1, "status": "running"}},
+        {"at": "1/4", "expected": {"value": 0.25, "weight": 1, "status": "running"}},
+        {"at": "1/2", "expected": {"value": 0, "weight": 1, "status": "running"}},
+        {"at": "3/4", "expected": {"value": -0.25, "weight": 1, "status": "running"}}
+      ]
+    },
+    {
+      "name": "cycle-rate-pause-and-resume",
+      "definition": {"body": {"kind": "cycle", "shape": "triangle", "rate": "1"}},
+      "steps": [
+        {"at": "1/4", "event": {"at": "1/4", "ordinal": 0, "action": "rate", "rate": "2"}, "expected": {"value": 0, "weight": 1, "status": "running"}},
+        {"at": "3/8", "event": {"at": "3/8", "ordinal": 0, "action": "pause"}, "expected": {"value": 1, "weight": 1, "status": "running"}},
+        {"at": "7/8", "restore": true, "event": {"at": "7/8", "ordinal": 0, "action": "resume"}, "expected": {"value": 1, "weight": 1, "status": "running"}},
+        {"at": "1", "expected": {"value": 0, "weight": 1, "status": "running"}}
+      ]
+    },
+    {
+      "name": "contour-holds-and-releases-current-level",
+      "definition": {"body": {"kind": "contour", "segments": [{"duration": "1 s", "to": 1}], "release": [{"duration": "1 s", "to": 0}]}},
+      "steps": [
+        {"at": "0", "expected": {"value": 0, "weight": 1, "status": "idle"}},
+        {"at": "0", "event": {"at": "0", "ordinal": 0, "action": "note_on"}, "expected": {"value": 0, "weight": 1, "status": "running"}},
+        {"at": "1/2", "expected": {"value": 0.5, "weight": 1, "status": "running"}},
+        {"at": "1", "expected": {"value": 1, "weight": 1, "status": "held"}},
+        {"at": "3/2", "event": {"at": "3/2", "ordinal": 0, "action": "note_off"}, "expected": {"value": 1, "weight": 1, "status": "running"}, "runtime": {"phase": "release"}},
+        {"at": "2", "restore": true, "expected": {"value": 0.5, "weight": 1, "status": "running"}},
+        {"at": "5/2", "expected": {"value": 0, "weight": 1, "status": "complete"}}
+      ]
+    },
+    {
+      "name": "note-off-at-stage-end-preempts-natural-completion",
+      "definition": {"body": {"kind": "stages", "initial_stage": "attack", "stages": [
+        {"name": "attack", "envelfo": {"kind": "contour", "segments": [{"duration": "1/4 s", "to": 1}]}},
+        {"name": "held", "envelfo": {"kind": "hold", "value": 1}},
+        {"name": "release", "envelfo": {"kind": "contour", "initial": "current", "segments": [{"duration": "1/4 s", "to": 0}]}}
+      ], "transitions": [
+        {"from": ["attack"], "event": "stage.done", "action": {"kind": "enter", "stage": "held"}},
+        {"from": ["attack", "held"], "event": "note_off", "action": {"kind": "enter", "stage": "release"}},
+        {"from": ["release"], "event": "stage.done", "action": {"kind": "finish"}}
+      ]}},
+      "steps": [
+        {"at": "1/8", "expected": {"value": 0.5, "weight": 1, "status": "running"}},
+        {"at": "1/4", "event": {"at": "1/4", "ordinal": 0, "action": "note_off"}, "expected": {"value": 1, "weight": 1, "status": "running"}, "runtime": {"stage": "release", "activation": 1}},
+        {"at": "3/8", "restore": true, "expected": {"value": 0.5, "weight": 1, "status": "running"}},
+        {"at": "1/2", "expected": {"value": 0, "weight": 1, "status": "complete"}, "events": [
+          {"at": "1/2", "port": "stage.done", "stage": "release", "activation": 1},
+          {"at": "1/2", "port": "done", "stage": "release", "activation": 1}
+        ], "runtime": {"stage": "release", "completed": true}},
+        {"at": "3/4", "expected": {"value": 0, "weight": 1, "status": "complete"}}
+      ]
+    },
+    {
+      "name": "cycle-markers-preserve-exact-time-and-partitions",
+      "definition": {"body": {"kind": "stages", "initial_stage": "wave", "stages": [{"name": "wave", "envelfo": {"kind": "cycle", "shape": "triangle", "rate": "3", "markers": [{"name": "quarter", "position": "1/4"}]}}]}},
+      "steps": [
+        {"at": "1/12", "expected": {"value": 0, "weight": 1, "status": "running"}, "events": [{"at": "1/12", "port": "quarter", "stage": "wave", "activation": 0}]},
+        {"at": "1/6", "restore": true, "expected": {"value": 1, "weight": 1, "status": "running"}},
+        {"at": "5/12", "expected": {"value": 0, "weight": 1, "status": "running"}, "events": [{"at": "5/12", "port": "quarter", "stage": "wave", "activation": 0}]},
+        {"at": "2/3", "expected": {"value": -1, "weight": 1, "status": "running"}}
+      ]
+    },
+    {
+      "name": "named-loop-final-crossing-orders-marker-cycle-and-done",
+      "definition": {"body": {"kind": "stages", "initial_stage": "sweep", "stages": [{"name": "sweep", "envelfo": {"kind": "contour", "segments": [{"duration": "1 s", "to": 1}], "playback": "loop", "loop_start": "lower", "loop_end": "upper", "repeat_count": 1, "markers": [{"name": "lower", "position": "1/4"}, {"name": "upper", "position": "3/4"}]}}]}},
+      "steps": [
+        {"at": "1/4", "expected": {"value": 0.25, "weight": 1, "status": "running"}, "events": [{"at": "1/4", "port": "lower", "stage": "sweep", "activation": 0}]},
+        {"at": "3/4", "restore": true, "expected": {"value": 0.75, "weight": 1, "status": "complete"}, "events": [
+          {"at": "3/4", "port": "lower", "stage": "sweep", "activation": 0},
+          {"at": "3/4", "port": "upper", "stage": "sweep", "activation": 0},
+          {"at": "3/4", "port": "cycle", "stage": "sweep", "activation": 0},
+          {"at": "3/4", "port": "stage.done", "stage": "sweep", "activation": 0}
+        ], "runtime": {"completed": true, "traversals": 1}},
+        {"at": "1", "expected": {"value": 0.75, "weight": 1, "status": "complete"}}
+      ]
+    },
+    {
+      "name": "transport-cycle-queries-song-position-directly",
+      "definition": {"clock": "beats", "position_driver": "transport", "body": {"kind": "cycle", "shape": "triangle", "rate": "1/4", "reset": "transport"}},
+      "steps": [
+        {"at": "0", "expected": {"value": -1, "weight": 1, "status": "running"}},
+        {"at": "2", "expected": {"value": 1, "weight": 1, "status": "running"}},
+        {"at": "1", "restore": true, "expected": {"value": 0, "weight": 1, "status": "running"}}
+      ]
+    }
+  ],
+  "random_vectors": [
+    {"state": "0x0", "next_state": "0x9e3779b97f4a7c15", "word": "0xe220a8397b1dcdaf"},
+    {"state": "0x9e3779b97f4a7c15", "next_state": "0x3c6ef372fe94f82a", "word": "0x6e789e6aa1b965f4"},
+    {"state": "0x3c6ef372fe94f82a", "next_state": "0xdaa66d2c7ddf743f", "word": "0x06c45d188009454f"}
+  ]
+}
