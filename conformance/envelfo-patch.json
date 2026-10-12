@@ -1,0 +1,48 @@
+{
+  "cases": [
+    {
+      "name": "natural-marker-starts-contour-with-exact-boundary",
+      "definition": {
+        "body": {
+          "kind": "patch",
+          "envelfos": {
+            "clock": {"kind": "cycle", "rate": "1", "markers": [{"name": "tick", "position": "1/4"}]},
+            "attack": {"kind": "contour", "start": "event", "segments": [{"duration": "1/2 s", "to": 1}]},
+            "level": {"kind": "affine", "input": "attack", "scale": 0.5, "offset": 0.5}
+          },
+          "outputs": {"plain": "attack", "scaled": "level"},
+          "event_outputs": {"tick": "clock.tick"},
+          "events": [{"source": "clock.tick", "target": "attack", "action": "start"}]
+        }
+      },
+      "steps": [
+        {"at": "0", "next_delivery": "1/100", "values": {"plain": 0, "scaled": 0.5}, "events": []},
+        {"at": "1/4", "next_delivery": "26/100", "values": {"plain": 0, "scaled": 0.5}, "events": [{"at": "1/4", "port": "tick"}]},
+        {"at": "1/2", "next_delivery": "51/100", "restore": true, "values": {"plain": 0.5, "scaled": 0.75}, "events": []},
+        {"at": "3/4", "next_delivery": "76/100", "values": {"plain": 1, "scaled": 1}, "events": []}
+      ]
+    },
+    {
+      "name": "threshold-uses-host-delivery-not-an-implicit-frame",
+      "definition": {
+        "body": {
+          "kind": "patch",
+          "envelfos": {
+            "clock": {"kind": "cycle", "shape": "triangle", "rate": "1"},
+            "edge": {"kind": "threshold", "input": "clock", "lower": -0.25, "upper": 0.25},
+            "attack": {"kind": "contour", "start": "event", "segments": [{"duration": "1/2 s", "to": 1}]}
+          },
+          "outputs": {"plain": "attack", "gate": "edge"},
+          "event_outputs": {"rise": "edge.rising"},
+          "events": [{"source": "edge.rising", "target": "attack", "action": "start"}]
+        }
+      },
+      "steps": [
+        {"at": "0", "next_delivery": "1/10", "values": {"plain": 0, "gate": 0}, "events": []},
+        {"at": "1/2", "next_delivery": "3/5", "values": {"plain": 0, "gate": 1}, "events": [{"at": "3/5", "port": "rise"}]},
+        {"at": "11/20", "next_delivery": "14/25", "restore": true, "values": {"plain": 0, "gate": 1}, "events": []},
+        {"at": "7/10", "next_delivery": "71/100", "values": {"plain": 0.2, "gate": 1}, "events": []}
+      ]
+    }
+  ]
+}
