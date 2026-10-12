@@ -4,8 +4,9 @@ Independent Python and Rust control libraries for envelopes, LFOs, Stages,
 composition and events. Extraction from uFor and enge is in progress.
 
 uFor owns the portable definitions. enveLFO owns their execution. The Python
-library requires neither NumPy nor an audio engine. Rust extraction is a
-subsequent milestone; no standalone Rust library is available yet.
+library requires neither NumPy nor an audio engine. The initial Rust core now
+supports exact Cycle playback and portable random words; the remaining bodies
+and composition are still being extracted.
 
 ## Python
 
@@ -102,8 +103,41 @@ chance streams, rather than assuming a global host connection index.
 The pending queue and emitted/delivered event work per advancement are bounded
 at 4096. Capacity errors are explicit and leave the supplied snapshot unchanged.
 NumPy block acceleration, voice ownership, and external cross-instance routing
-remain enge adapter responsibilities. No standalone Rust library is available
-yet.
+remain enge adapter responsibilities.
+
+## Standalone Rust core
+
+`crates/envelfo-core` is a normal Rust library, with no Python, PyO3, NumPy or
+audio dependency. Build and test it directly with `cargo test --workspace`;
+also check optimized overflow behavior with `cargo test --workspace --release`.
+`cargo clippy --workspace --all-targets -- -D warnings` checks the Rust source.
+The tested API example lives in the crate's documentation.
+
+`Cycle::new(rate)` uses the existing Cycle defaults. Pass exact positions in
+the Cycle's declared seconds/beat clock; a transport-position Cycle receives
+song beats directly. Hosts normalize authored quantities and supply clocks.
+The core does not parse Pint quantities, acquire tempo or interpret frame counts.
+Commands preserve phase, activation age, pause/reverse and reset behavior;
+failed commands leave the supplied state untouched. `CycleState::clone` provides
+continuation snapshots. A serialized Rust snapshot format is not provided yet.
+
+`Time` holds a reduced signed i64 numerator and positive i64 denominator. It
+accepts integer or rational literals, not floating-point or unit expressions.
+Construction and arithmetic return explicit errors for zero denominators,
+division by zero and values outside the normalized 64-bit component range.
+Intermediate products use i128 and reduce before checking the final components;
+the API never exposes unchecked arithmetic operators. Ordering and phase wraps
+stay exact, even when adjacent positions round to the same floating-point value.
+Conversions to and from arpeg's `num_rational::Ratio<i64>` are provided; incoming
+ratios are checked before normalization. Signal observations use floating point.
+The runtime dependency disables num-rational's default BigInt feature.
+
+The first slice passes the four Cycle traces and random vectors in the shared
+runtime corpus. Other trace bodies are not claimed as supported. Contours,
+Stages, Cycle marker emission, Patch operators/scheduling, host tempo maps,
+serialized snapshots and optional Python bindings remain Rust extraction work.
+The existing enge native playback still has floating-point event positions;
+using the extracted random-word kernel does not claim exact native timing.
 
 ## Verification
 
