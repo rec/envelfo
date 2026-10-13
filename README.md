@@ -17,8 +17,9 @@ keep their existing meaning.
 
 The envelope-like Envelfo body is `ufor.envelfo.Envelope`, with `kind = "envelope"`
 and state type `EnvelopeState`. It replaces `Contour` without aliases. Rust uses
-`envelfo_core::envelope`. uFor's lower-level `ufor.envelope.Envelope` remains a
-distinct renderer envelope; this rename does not merge the two models.
+`envelfo_core::envelope`. uFor's lower-level `ufor.envelope.VoiceEnvelope` is a
+distinct renderer envelope, with related `VoiceEnvelopeEvent`,
+`VoiceEnvelopeState`, and `VoiceEnvelopeValue` types. There are no old-name aliases.
 
 ## Python
 

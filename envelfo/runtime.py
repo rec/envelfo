@@ -73,7 +73,7 @@ def lfo_definition(definition: envelfo.EnvelfoUse) -> lfo.LFO:
     )
 
 
-def envelope_envelope(definition: envelfo.EnvelfoUse) -> envelope.Envelope:
+def envelope_envelope(definition: envelfo.EnvelfoUse) -> envelope.VoiceEnvelope:
     body = definition.body
     if not isinstance(body, envelfo.Envelope):
         raise ValueError('envelfo is not a envelope')
@@ -81,7 +81,7 @@ def envelope_envelope(definition: envelfo.EnvelfoUse) -> envelope.Envelope:
         raise ValueError('looping envelopes cannot be converted to envelopes')
     if body.initial == 'current':
         raise ValueError('envelope current value needs stage entry')
-    return envelope.Envelope(
+    return envelope.VoiceEnvelope(
         clock=definition.clock,
         scope=definition.scope,
         polarity=body.polarity,
