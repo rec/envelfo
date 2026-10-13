@@ -31,9 +31,9 @@ audio-device, or compiled-extension dependency.
 from fractions import Fraction
 
 from envelfo.runtime import envelfo_at, initial_envelfo
-from ufor.envelfo import LFO, EnvelfoUse
+from ufor.envelfo import LFO, EnveLFO
 
-definition = EnvelfoUse(body=LFO(rate=Fraction(1)))
+definition = EnveLFO(body=LFO(rate=Fraction(1)))
 state = initial_envelfo(definition, Fraction(0))
 value = envelfo_at(definition, state, Fraction(1, 4))
 assert value.value == 1.0
@@ -54,7 +54,7 @@ Portable random words live in `envelfo.random`; stream identities remain in
 
 ## Standalone Patches
 
-`envelfo.patch.initial_patch` accepts a materialized uFor `EnvelfoUse` whose body
+`envelfo.patch.initial_patch` accepts a materialized uFor `EnveLFO` whose body
 is a Patch. `advance_patch` processes exact natural boundaries and pending
 connections, then observes the named outputs once. Supply `at` and
 `next_delivery` as exact host seconds, with `next_delivery > at`. There is no
@@ -64,7 +64,7 @@ implicit sample rate or observation grid.
 from envelfo.patch import advance_patch, initial_patch
 from ufor.envelfo import Affine, Patch
 
-definition = EnvelfoUse(
+definition = EnveLFO(
     body=Patch(
         envelfos={
             'wave': LFO(rate=Fraction(1)),

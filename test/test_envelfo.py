@@ -7,10 +7,10 @@ from ufor.envelfo import (
     LFO,
     Affine,
     EnterStage,
+    EnveLFO,
     EnvelfoEvent,
     EnvelfoScore,
     EnvelfoState,
-    EnvelfoUse,
     Envelope,
     FinishStage,
     Hold,
@@ -40,8 +40,8 @@ from envelfo.runtime import (
 )
 
 
-def staged_envelfo() -> EnvelfoUse:
-    return EnvelfoUse(
+def staged_envelfo() -> EnveLFO:
+    return EnveLFO(
         body=Stages(
             initial_stage='waiting',
             stages=[
@@ -113,7 +113,7 @@ def test_next_stage_boundary_query_is_exact_and_does_not_advance_state(
         else Envelope(segments=[Segment(duration=Fraction(1, 4), to=1)])
     )
     body = Stages(initial_stage='source', stages=[Stage(name='source', envelfo=child)])
-    envelfo = EnvelfoUse(body=body)
+    envelfo = EnveLFO(body=body)
     state = initial_envelfo(envelfo, Fraction(0))
     assert isinstance(state.runtime, StageState)
     saved = state.model_dump_json()
@@ -131,7 +131,7 @@ def test_next_stage_boundary_query_is_exact_and_does_not_advance_state(
 
 
 def test_transport_position_lfo_follows_song_beats_across_seek() -> None:
-    envelfo = EnvelfoUse.model_validate(
+    envelfo = EnveLFO.model_validate(
         {
             'clock': 'beats',
             'position_driver': 'transport',
@@ -153,14 +153,14 @@ def test_transport_position_lfo_follows_song_beats_across_seek() -> None:
             envelfo, state, EnvelfoEvent(at=Fraction(1), ordinal=0, action='reset')
         )
     with pytest.raises(ValidationError, match='transport position requires'):
-        EnvelfoUse.model_validate(
+        EnveLFO.model_validate(
             {
                 'clock': 'beats',
                 'position_driver': 'transport',
                 'body': {'kind': 'lfo', 'rate': '1'},
             }
         )
-    reference = EnvelfoUse.model_validate(
+    reference = EnveLFO.model_validate(
         {
             'clock': 'beats',
             'position_driver': 'transport',
@@ -179,7 +179,7 @@ def test_transport_position_lfo_follows_song_beats_across_seek() -> None:
 
 
 def test_sample_hold_draws_only_on_sample_events_and_restores_its_stream() -> None:
-    envelfo = EnvelfoUse(body=SampleHold(minimum=0.2, maximum=0.8))
+    envelfo = EnveLFO(body=SampleHold(minimum=0.2, maximum=0.8))
     state = initial_envelfo(envelfo, Fraction(0), seed=123)
     assert isinstance(state.runtime, SampleHoldState)
     first = envelfo_at(envelfo, state, Fraction(10))
@@ -212,7 +212,7 @@ def test_sample_hold_draws_only_on_sample_events_and_restores_its_stream() -> No
 
 
 def test_sample_hold_with_equal_bounds_is_constant_but_advances_draws() -> None:
-    envelfo = EnvelfoUse(body=SampleHold(minimum=0.5, maximum=0.5))
+    envelfo = EnveLFO(body=SampleHold(minimum=0.5, maximum=0.5))
     initial = initial_envelfo(envelfo, Fraction(0))
     sampled = envelfo_event(
         envelfo, initial, EnvelfoEvent(at=Fraction(1), ordinal=0, action='sample')
@@ -264,7 +264,7 @@ def test_patch_marker_can_start_waiting_envelope() -> None:
         {'name': 'accent', 'title': 'Accent', 'body': body}
     )
     assert parse_score(score_toml(score)) == score
-    envelope = EnvelfoUse(body=score.body.envelfos['accent'])
+    envelope = EnveLFO(body=score.body.envelfos['accent'])
     state = initial_envelfo(envelope, Fraction(0))
     assert envelfo_at(envelope, state, Fraction(1)).value == 0
     state = envelfo_event(
@@ -327,7 +327,7 @@ def test_patch_marker_can_start_waiting_envelope() -> None:
 
 
 def test_autonomous_envelope_completes_without_note_off() -> None:
-    envelfo = EnvelfoUse(body=Envelope(segments=[Segment(duration=Fraction(1), to=1)]))
+    envelfo = EnveLFO(body=Envelope(segments=[Segment(duration=Fraction(1), to=1)]))
     state = initial_envelfo(envelfo, Fraction(2))
     assert envelfo_at(envelfo, state, Fraction(2)).status == 'running'
     assert envelfo_at(envelfo, state, Fraction(5, 2)).value == 0.5
@@ -345,7 +345,7 @@ def test_autonomous_envelope_completes_without_note_off() -> None:
 
 
 def test_triggered_envelope_holds_then_releases_from_current_value() -> None:
-    envelfo = EnvelfoUse(
+    envelfo = EnveLFO(
         body=Envelope(
             segments=[Segment(duration=Fraction(1), to=1)],
             release=[Segment(duration=Fraction(1), to=0)],
@@ -365,7 +365,7 @@ def test_triggered_envelope_holds_then_releases_from_current_value() -> None:
 
 
 def test_lfo_uses_same_value_and_event_contract() -> None:
-    envelfo = EnvelfoUse(body=LFO(rate=Fraction(1)))
+    envelfo = EnveLFO(body=LFO(rate=Fraction(1)))
     state = initial_envelfo(envelfo, Fraction(0))
     state = envelfo_event(
         envelfo,
@@ -385,7 +385,7 @@ def test_lfo_uses_same_value_and_event_contract() -> None:
 
 
 def test_lfo_pause_reverse_and_seek_preserve_seconds_position() -> None:
-    envelfo = EnvelfoUse(body=LFO(rate=Fraction(1), delay=Fraction(1, 4)))
+    envelfo = EnveLFO(body=LFO(rate=Fraction(1), delay=Fraction(1, 4)))
     state = initial_envelfo(envelfo, Fraction(0))
     state = envelfo_event(
         envelfo, state, EnvelfoEvent(at=Fraction(1, 4), ordinal=0, action='pause')
@@ -414,7 +414,7 @@ def test_lfo_pause_reverse_and_seek_preserve_seconds_position() -> None:
 
 
 def test_relative_shift_wraps_lfos_and_clamps_envelopes() -> None:
-    lfo = EnvelfoUse(body=LFO(rate=Fraction(1)))
+    lfo = EnveLFO(body=LFO(rate=Fraction(1)))
     lfo_state = envelfo_event(
         lfo,
         initial_envelfo(lfo, Fraction(0)),
@@ -427,7 +427,7 @@ def test_relative_shift_wraps_lfos_and_clamps_envelopes() -> None:
     )
     assert envelfo_at(lfo, lfo_state, Fraction(1, 4)).value == pytest.approx(-1)
 
-    envelope = EnvelfoUse(body=Envelope(segments=[Segment(duration=Fraction(1), to=1)]))
+    envelope = EnveLFO(body=Envelope(segments=[Segment(duration=Fraction(1), to=1)]))
     state = envelfo_event(
         envelope,
         initial_envelfo(envelope, Fraction(0)),
@@ -462,7 +462,7 @@ def test_relative_shift_wraps_lfos_and_clamps_envelopes() -> None:
 def test_envelope_playback_loops_and_releases_from_current_value(
     mode: PlaybackMode, at_end: float, after_end: float
 ) -> None:
-    envelfo = EnvelfoUse(
+    envelfo = EnveLFO(
         body=Envelope(
             segments=[Segment(duration=Fraction(1), to=1)],
             release=[Segment(duration=Fraction(1), to=0)],
@@ -496,7 +496,7 @@ def test_envelope_playback_loops_and_releases_from_current_value(
 
 
 def test_looping_envelope_shift_keeps_unwrapped_position() -> None:
-    envelfo = EnvelfoUse(
+    envelfo = EnveLFO(
         body=Envelope(
             segments=[Segment(duration=Fraction(1), to=1)],
             playback=PlaybackMode.ping_pong,
@@ -545,7 +545,7 @@ def test_looping_envelope_shift_keeps_unwrapped_position() -> None:
 def test_staged_envelope_playback_orders_markers_and_boundaries(
     mode: PlaybackMode, ports: list[tuple[Fraction, str]]
 ) -> None:
-    envelfo = EnvelfoUse(
+    envelfo = EnveLFO(
         body=Stages(
             initial_stage='sweep',
             stages=[
@@ -576,7 +576,7 @@ def test_staged_envelope_playback_orders_markers_and_boundaries(
 def test_staged_loop_releases_immediately_from_current_value(
     mode: PlaybackMode, captured: float
 ) -> None:
-    envelfo = EnvelfoUse(
+    envelfo = EnveLFO(
         body=Stages(
             initial_stage='sweep',
             stages=[
@@ -618,7 +618,7 @@ def test_staged_loop_releases_immediately_from_current_value(
 
 
 def test_staged_loop_cycle_port_can_enter_another_stage() -> None:
-    envelfo = EnvelfoUse(
+    envelfo = EnveLFO(
         body=Stages(
             initial_stage='sweep',
             stages=[
@@ -695,7 +695,7 @@ def test_named_envelope_loop_boundaries_preserve_markers_and_events(
         loop_start='start',
         loop_end='end',
     )
-    envelfo = EnvelfoUse(
+    envelfo = EnveLFO(
         body=Stages(
             initial_stage='sweep',
             stages=[Stage(name='sweep', envelfo=envelope)],
@@ -706,7 +706,7 @@ def test_named_envelope_loop_boundaries_preserve_markers_and_events(
     )
     assert [(e.at, e.port) for e in result.events] == boundary_events
     assert result.value.value == value
-    standalone = EnvelfoUse(body=envelope)
+    standalone = EnveLFO(body=envelope)
     started = envelfo_event(
         standalone,
         initial_envelfo(standalone, Fraction(0)),
@@ -716,7 +716,7 @@ def test_named_envelope_loop_boundaries_preserve_markers_and_events(
 
 
 def test_named_loop_reverse_orders_boundary_markers_before_cycle() -> None:
-    envelfo = EnvelfoUse(
+    envelfo = EnveLFO(
         body=Stages(
             initial_stage='sweep',
             stages=[
@@ -775,7 +775,7 @@ def test_finite_envelope_repeats_hold_final_boundary(
         playback=mode,
         repeat_count=2,
     )
-    staged = EnvelfoUse(
+    staged = EnveLFO(
         body=Stages(
             initial_stage='sweep',
             stages=[Stage(name='sweep', envelfo=envelope)],
@@ -790,7 +790,7 @@ def test_finite_envelope_repeats_hold_final_boundary(
         EnvelfoState.model_validate_json(result.state.model_dump_json()) == result.state
     )
 
-    standalone = EnvelfoUse(body=envelope)
+    standalone = EnveLFO(body=envelope)
     initial = initial_envelfo(standalone, Fraction(0))
     assert envelfo_at(standalone, initial, Fraction(3)).value == value
     assert envelfo_at(standalone, initial, Fraction(3)).status == 'complete'
@@ -814,7 +814,7 @@ def test_finite_named_loop_counts_reverse_boundary_crossing() -> None:
         loop_end='end',
         repeat_count=2,
     )
-    staged = EnvelfoUse(
+    staged = EnveLFO(
         body=Stages(
             initial_stage='sweep',
             stages=[Stage(name='sweep', envelfo=envelope)],
@@ -839,7 +839,7 @@ def test_finite_named_loop_counts_reverse_boundary_crossing() -> None:
 
 
 def test_final_repeat_emits_done_before_entering_next_stage() -> None:
-    envelfo = EnvelfoUse(
+    envelfo = EnveLFO(
         body=Stages(
             initial_stage='sweep',
             stages=[
@@ -873,7 +873,7 @@ def test_final_repeat_emits_done_before_entering_next_stage() -> None:
 
 
 def test_envelope_reverses_through_segments_without_recapturing_start() -> None:
-    envelfo = EnvelfoUse(
+    envelfo = EnveLFO(
         body=Envelope(
             segments=[Segment(duration=Fraction(1), to=1)],
             release=[Segment(duration=Fraction(1), to=0)],
@@ -928,7 +928,7 @@ def test_staged_reverse_markers_and_seek_do_not_undo_transitions() -> None:
 
 
 def test_unconnected_stage_completion_emits_once() -> None:
-    envelfo = EnvelfoUse(
+    envelfo = EnveLFO(
         body=Stages(
             initial_stage='rise',
             stages=[
@@ -948,7 +948,7 @@ def test_unconnected_stage_completion_emits_once() -> None:
 
 def test_stages_attack_sways_releases_and_emits_completion() -> None:
     envelfo = staged_envelfo()
-    assert EnvelfoUse.model_validate_json(envelfo.model_dump_json()) == envelfo
+    assert EnveLFO.model_validate_json(envelfo.model_dump_json()) == envelfo
     score = EnvelfoScore(name='bloom', title='Bloom', body=envelfo.body)
     assert parse_score(score_toml(score)) == score
     state = initial_envelfo(envelfo, Fraction(0))

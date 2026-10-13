@@ -94,7 +94,7 @@ def observe_signals(
 
 
 def initial_patch(
-    definition: envelfo.EnvelfoUse,
+    definition: envelfo.EnveLFO,
     at: Fraction,
     *,
     name: str = 'patch',
@@ -121,7 +121,7 @@ def initial_patch(
 
 
 def advance_patch(
-    definition: envelfo.EnvelfoUse,
+    definition: envelfo.EnveLFO,
     state: PatchState,
     at: Fraction,
     *,
@@ -170,7 +170,7 @@ def advance_patch(
 
 
 def patch_event(
-    definition: envelfo.EnvelfoUse,
+    definition: envelfo.EnveLFO,
     state: PatchState,
     target: str,
     event: envelfo.EnvelfoEvent,
@@ -187,19 +187,19 @@ def patch_event(
     return state.model_copy(update={'at': event.at}), emitted
 
 
-def _body(definition: envelfo.EnvelfoUse) -> envelfo.Patch:
+def _body(definition: envelfo.EnveLFO) -> envelfo.Patch:
     if not isinstance(definition.body, envelfo.Patch):
         raise ValueError('Patch execution requires a materialized Patch')
     return definition.body
 
 
-def _child(definition: envelfo.EnvelfoUse, name: str) -> envelfo.EnvelfoUse:
+def _child(definition: envelfo.EnveLFO, name: str) -> envelfo.EnveLFO:
     body = _body(definition).envelfos[name]
     if not isinstance(
         body, (envelfo.LFO, envelfo.Envelope, envelfo.Stages, envelfo.SampleHold)
     ):
         raise ValueError('commands require an executable Patch child')
-    return envelfo.EnvelfoUse(
+    return envelfo.EnveLFO(
         scope=definition.scope,
         clock=definition.clock,
         body=body,
@@ -207,7 +207,7 @@ def _child(definition: envelfo.EnvelfoUse, name: str) -> envelfo.EnvelfoUse:
 
 
 def _clock(
-    definition: envelfo.EnvelfoUse,
+    definition: envelfo.EnveLFO,
     seconds: Fraction,
     tempo_map: control.TempoMap | None,
 ) -> Fraction:
@@ -219,7 +219,7 @@ def _clock(
 
 
 def _seconds(
-    definition: envelfo.EnvelfoUse, at: Fraction, tempo_map: control.TempoMap | None
+    definition: envelfo.EnveLFO, at: Fraction, tempo_map: control.TempoMap | None
 ) -> Fraction:
     if definition.clock == control.Clock.seconds:
         return at
@@ -231,7 +231,7 @@ def _seconds(
 
 
 def _route(
-    definition: envelfo.EnvelfoUse,
+    definition: envelfo.EnveLFO,
     state: PatchState,
     source: str,
     event: envelfo.EnvelfoOutputEvent,
@@ -286,7 +286,7 @@ def _route(
 
 
 def _command(
-    definition: envelfo.EnvelfoUse,
+    definition: envelfo.EnveLFO,
     state: PatchState,
     target: str,
     event: envelfo.EnvelfoEvent,
@@ -317,7 +317,7 @@ def _command(
 
 
 def _run(
-    definition: envelfo.EnvelfoUse,
+    definition: envelfo.EnveLFO,
     state: PatchState,
     limit: Fraction,
     tempo_map: control.TempoMap | None,

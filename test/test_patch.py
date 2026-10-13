@@ -12,7 +12,7 @@ def clock_patch(
     every: int = 1,
     offset: int = 0,
     probability: float = 1,
-) -> envelfo.EnvelfoUse:
+) -> envelfo.EnveLFO:
     children: dict[str, object] = {
         'clock': {
             'kind': 'lfo',
@@ -31,7 +31,7 @@ def clock_patch(
             'initial': 0,
             'segments': [{'duration': '1/2 s', 'to': 1}],
         }
-    return envelfo.EnvelfoUse.model_validate(
+    return envelfo.EnveLFO.model_validate(
         {
             'body': {
                 'kind': 'patch',
@@ -55,7 +55,7 @@ def clock_patch(
 
 
 def observe(
-    definition: envelfo.EnvelfoUse, state: patch.PatchState, at: Fraction
+    definition: envelfo.EnveLFO, state: patch.PatchState, at: Fraction
 ) -> patch.PatchAdvance:
     return patch.advance_patch(
         definition, state, at, next_delivery=at + Fraction(1, 100)
@@ -163,7 +163,7 @@ def test_threshold_waits_for_explicit_next_delivery_then_applies_seconds_delay()
     }
     body['event_outputs'] = {'rise': 'edge.rising'}
     body['events'][0].update(source='edge.rising', delay='1/10')
-    definition = envelfo.EnvelfoUse.model_validate(raw)
+    definition = envelfo.EnveLFO.model_validate(raw)
     initial = patch.initial_patch(definition, Fraction(0))
     first = observe(definition, initial, Fraction(0))
     assert not first.events
@@ -180,7 +180,7 @@ def test_threshold_waits_for_explicit_next_delivery_then_applies_seconds_delay()
 
 
 def test_slew_uses_host_seconds_even_when_local_beats_are_stopped() -> None:
-    definition = envelfo.EnvelfoUse.model_validate(
+    definition = envelfo.EnveLFO.model_validate(
         {
             'clock': 'beats',
             'body': {
@@ -266,13 +266,13 @@ def test_invalid_host_schedule_and_unmaterialized_patch_are_rejected() -> None:
         )
     with pytest.raises(ValueError, match='materialized Patch'):
         patch.initial_patch(
-            envelfo.EnvelfoUse(body=envelfo.LFO(rate=Fraction(1))), Fraction(0)
+            envelfo.EnveLFO(body=envelfo.LFO(rate=Fraction(1))), Fraction(0)
         )
 
 
-def staged_patch(clock: str = 'seconds') -> envelfo.EnvelfoUse:
+def staged_patch(clock: str = 'seconds') -> envelfo.EnveLFO:
     unit = 's' if clock == 'seconds' else 'beat'
-    return envelfo.EnvelfoUse.model_validate(
+    return envelfo.EnveLFO.model_validate(
         {
             'clock': clock,
             'body': {
@@ -412,7 +412,7 @@ def test_beat_boundaries_use_elapsed_transport_but_delays_remain_seconds() -> No
 def test_same_time_connections_follow_declaration_order() -> None:
     raw = clock_patch('start').model_dump(mode='json')
     raw['body']['events'] = [raw['body']['events'][0], raw['body']['events'][0]]
-    definition = envelfo.EnvelfoUse.model_validate(raw)
+    definition = envelfo.EnveLFO.model_validate(raw)
     initial = patch.initial_patch(definition, Fraction(0))
     result = observe(definition, initial, Fraction(1, 4))
     assert result.state.children['held'].runtime.ordinal == 1
@@ -434,7 +434,7 @@ def test_event_processing_and_pending_delivery_capacities_are_explicit() -> None
 
 
 def test_command_events_keep_their_host_timestamp_while_beats_are_stopped() -> None:
-    definition = envelfo.EnvelfoUse.model_validate(
+    definition = envelfo.EnveLFO.model_validate(
         {
             'clock': 'beats',
             'body': {

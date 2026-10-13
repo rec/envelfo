@@ -23,7 +23,7 @@ class Observation(Model, frozen=True):
 
 class ContractCase(Model, frozen=True):
     name: str
-    definition: envelfo.EnvelfoUse
+    definition: envelfo.EnveLFO
     steps: list[Observation]
 
 

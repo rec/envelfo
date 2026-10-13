@@ -54,7 +54,7 @@ def transform_value(
     return value
 
 
-def lfo_definition(definition: envelfo.EnvelfoUse) -> lfo.LFO:
+def lfo_definition(definition: envelfo.EnveLFO) -> lfo.LFO:
     body = definition.body
     if not isinstance(body, envelfo.LFO):
         raise ValueError('envelfo is not an LFO')
@@ -73,7 +73,7 @@ def lfo_definition(definition: envelfo.EnvelfoUse) -> lfo.LFO:
     )
 
 
-def envelope_envelope(definition: envelfo.EnvelfoUse) -> envelope.VoiceEnvelope:
+def envelope_envelope(definition: envelfo.EnveLFO) -> envelope.VoiceEnvelope:
     body = definition.body
     if not isinstance(body, envelfo.Envelope):
         raise ValueError('envelfo is not a envelope')
@@ -95,7 +95,7 @@ def envelope_envelope(definition: envelfo.EnvelfoUse) -> envelope.VoiceEnvelope:
 
 
 def initial_envelfo(
-    definition: envelfo.EnvelfoUse, at: Fraction, *, seed: int = 0
+    definition: envelfo.EnveLFO, at: Fraction, *, seed: int = 0
 ) -> envelfo.EnvelfoState:
     if isinstance(definition.body, envelfo.SampleHold):
         random_state, word = random.random_word(seed)
@@ -160,7 +160,7 @@ def initial_envelfo(
 
 
 def envelfo_at(
-    definition: envelfo.EnvelfoUse, state: envelfo.EnvelfoState, at: Fraction
+    definition: envelfo.EnveLFO, state: envelfo.EnvelfoState, at: Fraction
 ) -> envelfo.EnvelfoValue:
     if isinstance(definition.body, envelfo.SampleHold) and isinstance(
         state.runtime, envelfo.SampleHoldState
@@ -220,7 +220,7 @@ def envelfo_at(
 
 
 def envelfo_event(
-    definition: envelfo.EnvelfoUse,
+    definition: envelfo.EnveLFO,
     state: envelfo.EnvelfoState,
     event: envelfo.EnvelfoEvent,
 ) -> envelfo.EnvelfoState:
@@ -386,7 +386,7 @@ def envelfo_event(
 
 
 def advance_envelfo(
-    definition: envelfo.EnvelfoUse,
+    definition: envelfo.EnveLFO,
     state: envelfo.EnvelfoState,
     at: Fraction,
     event: envelfo.EnvelfoEvent | None = None,

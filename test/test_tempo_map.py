@@ -3,7 +3,7 @@ from fractions import Fraction
 import pytest
 from pydantic import ValidationError
 from ufor.control import TempoMap
-from ufor.envelfo import EnvelfoEvent, EnvelfoUse, Envelope
+from ufor.envelfo import EnveLFO, EnvelfoEvent, Envelope
 from ufor.segments import Segment
 
 from envelfo.runtime import envelfo_at, envelfo_event, initial_envelfo
@@ -18,7 +18,7 @@ def test_beat_envelope_follows_host_tempo_and_preserves_authored_unit() -> None:
             ]
         }
     )
-    envelfo = EnvelfoUse.model_validate(
+    envelfo = EnveLFO.model_validate(
         {
             'clock': 'beats',
             'body': {
@@ -39,7 +39,7 @@ def test_beat_envelope_follows_host_tempo_and_preserves_authored_unit() -> None:
     assert envelfo_at(envelfo, state, clock.beat_at(Fraction(2))).value == 0.75
     assert isinstance(envelfo.body, Envelope)
     with pytest.raises(ValidationError, match='must match its clock'):
-        EnvelfoUse.model_validate(
+        EnveLFO.model_validate(
             {
                 'clock': 'beats',
                 'body': {
