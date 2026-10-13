@@ -14,8 +14,11 @@
 
 pub mod contour;
 pub mod cycle;
+pub mod patch;
 mod playback;
 pub mod random;
+pub mod sample_hold;
+pub mod signal;
 pub mod stages;
 pub mod time;
 
@@ -38,6 +41,7 @@ pub enum Error {
     EventOrder,
     Unsupported(&'static str),
     Capacity,
+    InvalidSignal,
 }
 
 impl std::fmt::Display for Error {
@@ -51,6 +55,7 @@ impl std::fmt::Display for Error {
             Self::TimeReversed => "query precedes current state; replay events to seek",
             Self::EventOrder => "commands must increase in time and ordinal order",
             Self::Capacity => "Envelfo event capacity exceeded",
+            Self::InvalidSignal => "Patch signal is not finite",
         })
     }
 }

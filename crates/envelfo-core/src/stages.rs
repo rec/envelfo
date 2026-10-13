@@ -72,7 +72,7 @@ pub struct Advance {
 #[derive(Clone, Debug, PartialEq)]
 pub struct StageState {
     at: Time,
-    ordinal: Option<u64>,
+    pub(crate) ordinal: Option<u64>,
     stage: usize,
     entry_value: f64,
     position: Position,

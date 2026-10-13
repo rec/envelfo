@@ -4,6 +4,7 @@ use envelfo_core::cycle::{Clock, Command, Cycle, Driver, Reset, Shape};
 use envelfo_core::random::random_word;
 use envelfo_core::stages::{Action, Body, Event, Stage, StageCommand, Stages, Transition};
 use envelfo_core::time::Time;
+use envelfo_core::{patch, signal};
 use serde_json::Value;
 
 #[test]
@@ -21,6 +22,48 @@ fn rate_pause_and_resume_match_shared_trace() {
 #[test]
 fn transport_position_matches_shared_trace() {
     check_cycle("transport-cycle-queries-song-position-directly");
+}
+
+#[test]
+fn patch_orchestration_matches_shared_observation_and_delivery_traces() {
+    let corpus: Value =
+        serde_json::from_str(include_str!("../../../conformance/envelfo-patch.json")).unwrap();
+    for case in corpus["cases"].as_array().unwrap() {
+        let definition = patch_definition(&case["definition"]["body"]);
+        let mut state = definition
+            .initial(Time::ZERO, "patch", 0, &patch::Seconds)
+            .unwrap();
+        for step in case["steps"].as_array().unwrap() {
+            if step["restore"] == true {
+                state = state.clone();
+            }
+            let result = definition
+                .advance(
+                    &mut state,
+                    rational(&step["at"]),
+                    rational(&step["next_delivery"]),
+                    &patch::Seconds,
+                )
+                .unwrap();
+            let expected = step["values"].as_object().unwrap();
+            assert_eq!(result.values.len(), expected.len());
+            for (name, value) in expected {
+                assert!(
+                    (result.values[name] - value.as_f64().unwrap()).abs() <= 1e-12,
+                    "{} at {}: {:?}",
+                    case["name"],
+                    step["at"],
+                    result.values
+                );
+            }
+            let expected = step["events"].as_array().unwrap();
+            assert_eq!(result.events.len(), expected.len());
+            for (event, expected) in result.events.iter().zip(expected) {
+                assert_eq!(event.at, rational(&expected["at"]));
+                assert_eq!(event.port, expected["port"].as_str().unwrap());
+            }
+        }
+    }
 }
 
 #[test]
@@ -144,6 +187,21 @@ fn splitmix_words_match_shared_vectors() {
                 16
             )
             .unwrap()
+        );
+    }
+}
+
+#[test]
+fn stream_identities_match_shared_sha256_vectors() {
+    let vectors: Value =
+        serde_json::from_str(include_str!("../../../conformance/envelfo-streams.json")).unwrap();
+    for vector in vectors["vectors"].as_array().unwrap() {
+        assert_eq!(
+            envelfo_core::random::stream_key(
+                vector["seed"].as_u64().unwrap(),
+                vector["identity"].as_str().unwrap()
+            ),
+            u64::from_str_radix(vector["key"].as_str().unwrap(), 16).unwrap()
         );
     }
 }
@@ -320,6 +378,9 @@ fn contour(body: &Value) -> Contour {
         Initial::Value(body["initial"].as_f64().unwrap_or(0.0))
     };
     contour.release = segments("release");
+    if body["start"] == "event" {
+        contour.start = envelfo_core::contour::Start::Event;
+    }
     contour.markers = markers(body);
     contour.playback = match body["playback"].as_str().unwrap_or("once") {
         "once" => Playback::Once,
@@ -389,6 +450,115 @@ fn stages(body: &Value) -> Stages {
                             "enter" => Action::Enter(t["action"]["stage"].as_str().unwrap().into()),
                             "finish" => Action::Finish,
                             _ => panic!("unknown action"),
+                        },
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
+    }
+}
+
+fn patch_definition(body: &Value) -> patch::Patch {
+    let source = |value: &Value| {
+        let (child, port) = value.as_str().unwrap().split_once('.').unwrap();
+        patch::Port {
+            child: child.into(),
+            port: port.into(),
+        }
+    };
+    patch::Patch {
+        children: body["envelfos"]
+            .as_object()
+            .unwrap()
+            .iter()
+            .map(|(name, body)| patch::Child {
+                name: name.clone(),
+                node: match body["kind"].as_str().unwrap() {
+                    "cycle" => patch::Node::Cycle {
+                        body: cycle(body),
+                        markers: markers(body),
+                    },
+                    "contour" => patch::Node::Contour(contour(body)),
+                    "stages" => patch::Node::Stages(stages(body)),
+                    "affine" => patch::Node::Signal(signal::Operator::Affine {
+                        input: body["input"].as_str().unwrap().into(),
+                        scale: body["scale"].as_f64().unwrap_or(1.0),
+                        offset: body["offset"].as_f64().unwrap_or(0.0),
+                    }),
+                    "threshold" => patch::Node::Signal(signal::Operator::Threshold {
+                        input: body["input"].as_str().unwrap().into(),
+                        lower: body["lower"].as_f64().unwrap(),
+                        upper: body["upper"].as_f64().unwrap(),
+                    }),
+                    "sum" | "product" => {
+                        let inputs = body["inputs"]
+                            .as_array()
+                            .unwrap()
+                            .iter()
+                            .map(|v| v.as_str().unwrap().into())
+                            .collect();
+                        patch::Node::Signal(if body["kind"] == "sum" {
+                            signal::Operator::Sum(inputs)
+                        } else {
+                            signal::Operator::Product(inputs)
+                        })
+                    }
+                    "quantize" => patch::Node::Signal(signal::Operator::Quantize {
+                        input: body["input"].as_str().unwrap().into(),
+                        step: body["step"].as_f64().unwrap(),
+                        origin: body["origin"].as_f64().unwrap_or(0.0),
+                    }),
+                    "latch" => patch::Node::Signal(signal::Operator::Latch(
+                        body["input"].as_str().unwrap().into(),
+                    )),
+                    "slew" => patch::Node::Signal(signal::Operator::Slew {
+                        input: body["input"].as_str().unwrap().into(),
+                        rise: body["rise"].as_f64().unwrap(),
+                        fall: body["fall"].as_f64().unwrap(),
+                        initial: body["initial"].as_f64(),
+                    }),
+                    _ => panic!("unverified Patch node"),
+                },
+            })
+            .collect(),
+        outputs: body["outputs"]
+            .as_object()
+            .unwrap()
+            .iter()
+            .map(|(name, source)| patch::Output {
+                name: name.clone(),
+                source: source.as_str().unwrap().into(),
+            })
+            .collect(),
+        event_outputs: body["event_outputs"]
+            .as_object()
+            .map(|v| {
+                v.iter()
+                    .map(|(name, value)| patch::EventOutput {
+                        name: name.clone(),
+                        source: source(value),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
+        connections: body["events"]
+            .as_array()
+            .map(|v| {
+                v.iter()
+                    .map(|c| patch::Connection {
+                        source: source(&c["source"]),
+                        target: c["target"].as_str().unwrap().into(),
+                        action: match c["action"].as_str().unwrap_or("start") {
+                            "start" => patch::ConnectionAction::Start,
+                            _ => panic!("unverified connection action"),
+                        },
+                        every: c["every"].as_u64().unwrap_or(1),
+                        offset: c["offset"].as_u64().unwrap_or(0),
+                        probability: c["probability"].as_f64().unwrap_or(1.0),
+                        delay: if c["delay"].is_null() {
+                            Time::ZERO
+                        } else {
+                            rational(&c["delay"])
                         },
                     })
                     .collect()

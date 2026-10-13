@@ -5,8 +5,9 @@ composition and events. Extraction from uFor and enge is in progress.
 
 uFor owns the portable definitions. enveLFO owns their execution. The Python
 library requires neither NumPy nor an audio engine. The Rust core now
-supports exact Cycle, Contour and Stages playback and portable random words; composition
-and composition are still being extracted.
+supports exact Cycle, Contour, Stages and Patch execution, including signal
+operators, connection scheduling and portable random streams. Consumer adapter
+integration is still in progress.
 
 ## Python
 
@@ -154,16 +155,49 @@ capacity error rather than dropped events. Public Rust definition fields are
 normalized host inputs, not an authored-document/Pint parser; initialize state
 again after changing a definition.
 
-All ten body traces and random vectors in the shared runtime corpus now pass
-directly in Rust. Top-level Cycle marker emission, Patch operators/scheduling, host tempo maps,
-serialized snapshots and optional Python bindings remain Rust extraction work.
+`Patch::initial(at, name, seed, clock)` validates the materialized graph, signal
+dependencies, event ports, output names, action targets and finite signal ranges.
+Child, connection and event-output vectors preserve declaration order. Signal
+ordering matches Python's first-encountered dependency order. Nodes include
+Cycles with markers, Contours, Stages, SampleHold, and Sum/Product/Affine/Quantize/
+Latch/Threshold/Slew operators. Signals remain dimensionless and are not clipped.
+
+`Patch::advance(state, at, next_delivery, clock)` processes exact natural events
+and queued commands, then observes the graph once. Times `at`, `next_delivery`
+and connection delays are host seconds. `Seconds` supplies the identity clock;
+beat-clock hosts implement `ClockMapping` with monotonic elapsed beats and their
+inverse host times, not seekable song positions. No tempo-map implementation,
+MIDI clock acquisition, implicit observation grid or audio rate is imposed.
+Slew always measures host seconds, including when the beat clock is stopped.
+Threshold initializes silently; later edges are timestamped at `next_delivery`,
+and any connection delay is added to that time. Capture clears Latch state at
+delivery so the next observation captures the current input.
+
+`Patch::command` delivers an addressed child command without adding a signal
+observation. Same-time external commands can preempt Stage completion. Natural
+events are routed before pending deliveries; connections run in declaration
+order and zero-delay cascades are processed at the same exact host time.
+Every/offset gates are first-aligned; probability zero/one consumes no random
+word. `random::stream_key` preserves uFor's SHA-256 identity bytes. The core uses
+RustCrypto's SHA-256 implementation, with no Python or audio dependency.
+
+Patch state can be cloned for independent continuation. Failed calls roll back
+all child state, retained observations, gates, random draws and pending events.
+Pending queues and processed events retain their separate 4096 limits. This
+allocating API does not promise an allocation-free real-time callback. Public
+normalized definitions must remain unchanged while using initialized state.
+
+All ten body traces, four Patch traces and portable random/identity vectors now
+pass directly in both languages. Built-in host tempo maps, serialized snapshots,
+optional Python bindings and consumer adapter replacement remain extraction work.
 The existing enge native playback still has floating-point event positions;
 using the extracted random-word kernel does not claim exact native timing.
 
 ## Verification
 
 Run `uv run pytest` for the reference tests and the language-neutral cases in
-`conformance/envelfo-runtime.json` and `conformance/envelfo-patch.json`. These
+`conformance/envelfo-runtime.json`, `conformance/envelfo-patch.json` and
+`conformance/envelfo-streams.json`. These
 preserve exact event ordering and
 random words, with explicit tolerances for floating-point signal values.
 Linux, Windows, and macOS checks are release gates, not per-commit jobs.

@@ -1,6 +1,18 @@
+import json
+from pathlib import Path
+
 import pytest
+from ufor.envelfo_random import stream_key
 
 from envelfo.random import random_word
+
+
+def test_stream_identities_match_shared_sha256_vectors() -> None:
+    vectors = json.loads(
+        (Path(__file__).parents[1] / 'conformance/envelfo-streams.json').read_text()
+    )['vectors']
+    for v in vectors:
+        assert stream_key(v['seed'], v['identity']) == int(v['key'], 16)
 
 
 @pytest.mark.parametrize(

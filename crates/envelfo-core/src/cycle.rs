@@ -223,8 +223,8 @@ pub enum Direction {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CycleState {
-    ordinal: Option<u64>,
-    position: Position,
+    pub(crate) ordinal: Option<u64>,
+    pub(crate) position: Position,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

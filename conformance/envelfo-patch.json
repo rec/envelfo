@@ -1,6 +1,49 @@
 {
   "cases": [
     {
+      "name": "topological-observation-order-retains-first-encountered-dependencies",
+      "definition": {"body": {
+        "kind": "patch",
+        "envelfos": {
+          "edge_z": {"kind": "threshold", "input": "root_z", "lower": -0.25, "upper": 0.25},
+          "edge_a": {"kind": "threshold", "input": "root_a", "lower": -0.25, "upper": 0.25},
+          "root_a": {"kind": "cycle", "shape": "triangle", "rate": "1"},
+          "root_z": {"kind": "cycle", "shape": "triangle", "rate": "1"}
+        },
+        "outputs": {"a": "edge_a", "z": "edge_z"},
+        "event_outputs": {"a-rise": "edge_a.rising", "z-rise": "edge_z.rising"}
+      }},
+      "steps": [
+        {"at": "0", "next_delivery": "1/10", "values": {"a": 0, "z": 0}, "events": []},
+        {"at": "1/2", "next_delivery": "3/5", "restore": true, "values": {"a": 1, "z": 1}, "events": [{"at": "3/5", "port": "z-rise"}, {"at": "3/5", "port": "a-rise"}]}
+      ]
+    },
+    {
+      "name": "signal-operators-share-observation-state-without-clipping",
+      "definition": {"body": {
+        "kind": "patch",
+        "envelfos": {
+          "sum": {"kind": "sum", "inputs": ["clock", "scaled"]},
+          "product": {"kind": "product", "inputs": ["clock", "scaled"]},
+          "grid": {"kind": "quantize", "input": "sum", "step": 1},
+          "left": {"kind": "latch", "input": "clock"},
+          "slew": {"kind": "slew", "input": "scaled", "rise": 2, "fall": 1, "initial": 0},
+          "edge": {"kind": "threshold", "input": "clock", "lower": -0.25, "upper": 0.25},
+          "scaled": {"kind": "affine", "input": "clock", "scale": 2, "offset": 1},
+          "clock": {"kind": "cycle", "shape": "triangle", "rate": "1"}
+        },
+        "outputs": {"sum": "sum", "product": "product", "grid": "grid", "held": "left", "slew": "slew", "gate": "edge"},
+        "event_outputs": {"rise": "edge.rising", "fall": "edge.falling"}
+      }},
+      "steps": [
+        {"at": "0", "next_delivery": "1/10", "values": {"sum": -2, "product": 1, "grid": -2, "held": -1, "slew": 0, "gate": 0}, "events": []},
+        {"at": "1/4", "next_delivery": "3/10", "values": {"sum": 1, "product": 0, "grid": 1, "held": -1, "slew": 0.5, "gate": 0}, "events": []},
+        {"at": "1/2", "next_delivery": "3/5", "restore": true, "values": {"sum": 4, "product": 3, "grid": 4, "held": -1, "slew": 1, "gate": 1}, "events": [{"at": "3/5", "port": "rise"}]},
+        {"at": "3/4", "next_delivery": "4/5", "values": {"sum": 1, "product": 0, "grid": 1, "held": -1, "slew": 1, "gate": 1}, "events": []},
+        {"at": "1", "next_delivery": "11/10", "values": {"sum": -2, "product": 1, "grid": -2, "held": -1, "slew": 0.75, "gate": 0}, "events": [{"at": "11/10", "port": "fall"}]}
+      ]
+    },
+    {
       "name": "natural-marker-starts-contour-with-exact-boundary",
       "definition": {
         "body": {

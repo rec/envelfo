@@ -409,7 +409,7 @@ pub enum Phase {
 #[derive(Clone, Debug, PartialEq)]
 pub struct ContourState {
     position: Position,
-    ordinal: Option<u64>,
+    pub(crate) ordinal: Option<u64>,
     phase: Phase,
     start_value: f64,
     traversals: u64,
