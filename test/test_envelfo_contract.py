@@ -23,7 +23,7 @@ class Observation(Model, frozen=True):
 
 class ContractCase(Model, frozen=True):
     name: str
-    definition: envelfo.EnveLFO
+    definition: envelfo.Generator
     steps: list[Observation]
 
 
@@ -39,7 +39,7 @@ def test_envelfo_runtime_matches_portable_contract(case: ContractCase) -> None:
     for step in case.steps:
         if step.restore:
             state = envelfo.EnvelfoState.model_validate_json(state.model_dump_json())
-        if isinstance(case.definition.body, envelfo.Stages):
+        if isinstance(case.definition, envelfo.Stages):
             result = runtime.advance_envelfo(
                 case.definition, state, step.at, step.event
             )
@@ -60,7 +60,7 @@ def test_envelfo_runtime_matches_portable_contract(case: ContractCase) -> None:
 
 @pytest.mark.parametrize(
     'case',
-    [c for c in CASES if isinstance(c.definition.body, envelfo.Stages)],
+    [c for c in CASES if isinstance(c.definition, envelfo.Stages)],
     ids=lambda c: c.name,
 )
 def test_staged_contract_is_independent_of_advance_partitions(

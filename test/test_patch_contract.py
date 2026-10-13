@@ -24,7 +24,7 @@ class Observation(Model, frozen=True):
 
 class ContractCase(Model, frozen=True):
     name: str
-    definition: envelfo.EnveLFO
+    definition: envelfo.Generator
     steps: list[Observation]
 
 

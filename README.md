@@ -15,11 +15,16 @@ type `LFOState`. This replaces `Cycle` without compatibility aliases. Rust uses
 it is not a body type. Oscillator duty cycles and graph dependency cycles also
 keep their existing meaning.
 
-The envelope-like Envelfo body is `ufor.envelfo.Envelope`, with `kind = "envelope"`
-and state type `EnvelopeState`. It replaces `Contour` without aliases. Rust uses
-`envelfo_core::envelope`. uFor's lower-level `ufor.envelope.VoiceEnvelope` is a
-distinct renderer envelope, with related `VoiceEnvelopeEvent`,
-`VoiceEnvelopeState`, and `VoiceEnvelopeValue` types. There are no old-name aliases.
+`Envelope`, `LFO`, `Stages`, `SampleHold` and `Patch` inherit from `EnveLFO`.
+Definitions are flat: `LFO(rate=1, clock="seconds", scope="voice")`.
+Patch and Stage children inherit clock and scope without authored overrides.
+`EnveLFOReference` represents a library reference until materialization.
+
+`ufor.envelfo.Envelope` is the single envelope model for modulation and voice
+amplitude. There are no `VoiceEnvelope` types or evaluator aliases. The runtime
+uses `EnvelfoEvent`, `EnvelfoState` and `EnvelfoValue`; Rust uses
+`envelfo_core::envelope`. Audio voice retirement and amplitude renderer support
+restrictions belong to enge, not the standalone envelope runtime.
 
 ## Python
 
@@ -31,9 +36,9 @@ audio-device, or compiled-extension dependency.
 from fractions import Fraction
 
 from envelfo.runtime import envelfo_at, initial_envelfo
-from ufor.envelfo import LFO, EnveLFO
+from ufor.envelfo import LFO
 
-definition = EnveLFO(body=LFO(rate=Fraction(1)))
+definition = LFO(rate=Fraction(1))
 state = initial_envelfo(definition, Fraction(0))
 value = envelfo_at(definition, state, Fraction(1, 4))
 assert value.value == 1.0
@@ -54,8 +59,8 @@ Portable random words live in `envelfo.random`; stream identities remain in
 
 ## Standalone Patches
 
-`envelfo.patch.initial_patch` accepts a materialized uFor `EnveLFO` whose body
-is a Patch. `advance_patch` processes exact natural boundaries and pending
+`envelfo.patch.initial_patch` accepts a materialized uFor `Patch`.
+`advance_patch` processes exact natural boundaries and pending
 connections, then observes the named outputs once. Supply `at` and
 `next_delivery` as exact host seconds, with `next_delivery > at`. There is no
 implicit sample rate or observation grid.
@@ -64,14 +69,12 @@ implicit sample rate or observation grid.
 from envelfo.patch import advance_patch, initial_patch
 from ufor.envelfo import Affine, Patch
 
-definition = EnveLFO(
-    body=Patch(
+definition = Patch(
         envelfos={
             'wave': LFO(rate=Fraction(1)),
             'level': Affine(input='wave', scale=0.5, offset=0.5),
         },
         outputs={'expression': 'level'},
-    )
 )
 state = initial_patch(definition, Fraction(0), name='expression')
 result = advance_patch(

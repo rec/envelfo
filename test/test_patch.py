@@ -1,6 +1,7 @@
 from fractions import Fraction
 
 import pytest
+from pydantic import TypeAdapter
 from ufor import control, envelfo, envelfo_random
 
 from envelfo import patch, random
@@ -31,25 +32,23 @@ def clock_patch(
             'initial': 0,
             'segments': [{'duration': '1/2 s', 'to': 1}],
         }
-    return envelfo.EnveLFO.model_validate(
+    return TypeAdapter(envelfo.Generator).validate_python(
         {
-            'body': {
-                'kind': 'patch',
-                'envelfos': children,
-                'outputs': {'value': 'held', 'second': 'scaled', 'capture': 'left'},
-                'event_outputs': {'tick': 'clock.tick'},
-                'events': [
-                    {
-                        'source': 'clock.tick',
-                        'target': 'left' if action == 'capture' else 'held',
-                        'action': action,
-                        'delay': delay,
-                        'every': every,
-                        'offset': offset,
-                        'probability': probability,
-                    }
-                ],
-            }
+            'kind': 'patch',
+            'envelfos': children,
+            'outputs': {'value': 'held', 'second': 'scaled', 'capture': 'left'},
+            'event_outputs': {'tick': 'clock.tick'},
+            'events': [
+                {
+                    'source': 'clock.tick',
+                    'target': 'left' if action == 'capture' else 'held',
+                    'action': action,
+                    'delay': delay,
+                    'every': every,
+                    'offset': offset,
+                    'probability': probability,
+                }
+            ],
         }
     )
 
@@ -154,7 +153,7 @@ def test_threshold_waits_for_explicit_next_delivery_then_applies_seconds_delay()
     None
 ):
     raw = clock_patch().model_dump(mode='json')
-    body = raw['body']
+    body = raw
     body['envelfos']['edge'] = {
         'kind': 'threshold',
         'input': 'clock',
@@ -163,7 +162,7 @@ def test_threshold_waits_for_explicit_next_delivery_then_applies_seconds_delay()
     }
     body['event_outputs'] = {'rise': 'edge.rising'}
     body['events'][0].update(source='edge.rising', delay='1/10')
-    definition = envelfo.EnveLFO.model_validate(raw)
+    definition = TypeAdapter(envelfo.Generator).validate_python(raw)
     initial = patch.initial_patch(definition, Fraction(0))
     first = observe(definition, initial, Fraction(0))
     assert not first.events
@@ -180,23 +179,21 @@ def test_threshold_waits_for_explicit_next_delivery_then_applies_seconds_delay()
 
 
 def test_slew_uses_host_seconds_even_when_local_beats_are_stopped() -> None:
-    definition = envelfo.EnveLFO.model_validate(
+    definition = TypeAdapter(envelfo.Generator).validate_python(
         {
-            'clock': 'beats',
-            'body': {
-                'kind': 'patch',
-                'envelfos': {
-                    'constant': {'kind': 'lfo', 'rate': '0', 'center': 1, 'depth': 0},
-                    'slew': {
-                        'kind': 'slew',
-                        'input': 'constant',
-                        'rise': '2/s',
-                        'fall': '1/s',
-                        'initial': 0,
-                    },
+            'kind': 'patch',
+            'envelfos': {
+                'constant': {'kind': 'lfo', 'rate': '0', 'center': 1, 'depth': 0},
+                'slew': {
+                    'kind': 'slew',
+                    'input': 'constant',
+                    'rise': '2/s',
+                    'fall': '1/s',
+                    'initial': 0,
                 },
-                'outputs': {'value': 'slew'},
             },
+            'outputs': {'value': 'slew'},
+            'clock': 'beats',
         }
     )
     tempo = control.TempoMap(
@@ -265,81 +262,74 @@ def test_invalid_host_schedule_and_unmaterialized_patch_are_rejected() -> None:
             definition.model_copy(update={'clock': control.Clock.beats}), Fraction(0)
         )
     with pytest.raises(ValueError, match='materialized Patch'):
-        patch.initial_patch(
-            envelfo.EnveLFO(body=envelfo.LFO(rate=Fraction(1))), Fraction(0)
-        )
+        patch.initial_patch(envelfo.LFO(rate=Fraction(1)), Fraction(0))
 
 
 def staged_patch(clock: str = 'seconds') -> envelfo.EnveLFO:
     unit = 's' if clock == 'seconds' else 'beat'
-    return envelfo.EnveLFO.model_validate(
+    return TypeAdapter(envelfo.Generator).validate_python(
         {
-            'clock': clock,
-            'body': {
-                'kind': 'patch',
-                'envelfos': {
-                    'attack': {
-                        'kind': 'stages',
-                        'initial_stage': 'on',
-                        'stages': [
-                            {
-                                'name': 'on',
-                                'envelfo': {
-                                    'kind': 'envelope',
-                                    'segments': [{'duration': f'1/2 {unit}', 'to': 1}],
-                                },
+            'kind': 'patch',
+            'envelfos': {
+                'attack': {
+                    'kind': 'stages',
+                    'initial_stage': 'on',
+                    'stages': [
+                        {
+                            'name': 'on',
+                            'envelfo': {
+                                'kind': 'envelope',
+                                'segments': [{'duration': f'1/2 {unit}', 'to': 1}],
                             },
-                            {'name': 'off', 'envelfo': {'kind': 'hold', 'value': 0}},
-                        ],
-                        'transitions': [
-                            {
-                                'from': ['on'],
-                                'event': 'note_off',
-                                'action': {'kind': 'enter', 'stage': 'off'},
-                            }
-                        ],
-                    },
-                    'receiver': {
-                        'kind': 'stages',
-                        'initial_stage': 'waiting',
-                        'stages': [
-                            {
-                                'name': 'waiting',
-                                'envelfo': {'kind': 'hold', 'value': 0},
-                            },
-                            {
-                                'name': 'high',
-                                'envelfo': {
-                                    'kind': 'envelope',
-                                    'initial': 1,
-                                    'segments': [{'duration': f'1/10 {unit}', 'to': 1}],
-                                },
-                            },
-                        ],
-                        'transitions': [
-                            {
-                                'from': ['waiting', 'high'],
-                                'event': 'cue.go',
-                                'action': {'kind': 'enter', 'stage': 'high'},
-                            }
-                        ],
-                    },
+                        },
+                        {'name': 'off', 'envelfo': {'kind': 'hold', 'value': 0}},
+                    ],
+                    'transitions': [
+                        {
+                            'from': ['on'],
+                            'event': 'note_off',
+                            'action': {'kind': 'enter', 'stage': 'off'},
+                        }
+                    ],
                 },
-                'outputs': {'value': 'receiver'},
-                'event_outputs': {
-                    'finished': 'attack.stage.done',
-                    'received': 'receiver.stage.done',
+                'receiver': {
+                    'kind': 'stages',
+                    'initial_stage': 'waiting',
+                    'stages': [
+                        {'name': 'waiting', 'envelfo': {'kind': 'hold', 'value': 0}},
+                        {
+                            'name': 'high',
+                            'envelfo': {
+                                'kind': 'envelope',
+                                'initial': 1,
+                                'segments': [{'duration': f'1/10 {unit}', 'to': 1}],
+                            },
+                        },
+                    ],
+                    'transitions': [
+                        {
+                            'from': ['waiting', 'high'],
+                            'event': 'cue.go',
+                            'action': {'kind': 'enter', 'stage': 'high'},
+                        }
+                    ],
                 },
-                'events': [
-                    {
-                        'source': 'attack.stage.done',
-                        'target': 'receiver',
-                        'action': 'cue',
-                        'cue': 'go',
-                        'delay': '1/10',
-                    }
-                ],
             },
+            'outputs': {'value': 'receiver'},
+            'event_outputs': {
+                'finished': 'attack.stage.done',
+                'received': 'receiver.stage.done',
+            },
+            'events': [
+                {
+                    'source': 'attack.stage.done',
+                    'target': 'receiver',
+                    'action': 'cue',
+                    'cue': 'go',
+                    'delay': '1/10',
+                }
+            ],
+            'clock': clock,
         }
     )
 
@@ -411,8 +401,8 @@ def test_beat_boundaries_use_elapsed_transport_but_delays_remain_seconds() -> No
 
 def test_same_time_connections_follow_declaration_order() -> None:
     raw = clock_patch('start').model_dump(mode='json')
-    raw['body']['events'] = [raw['body']['events'][0], raw['body']['events'][0]]
-    definition = envelfo.EnveLFO.model_validate(raw)
+    raw['events'] = [raw['events'][0], raw['events'][0]]
+    definition = TypeAdapter(envelfo.Generator).validate_python(raw)
     initial = patch.initial_patch(definition, Fraction(0))
     result = observe(definition, initial, Fraction(1, 4))
     assert result.state.children['held'].runtime.ordinal == 1
@@ -434,42 +424,37 @@ def test_event_processing_and_pending_delivery_capacities_are_explicit() -> None
 
 
 def test_command_events_keep_their_host_timestamp_while_beats_are_stopped() -> None:
-    definition = envelfo.EnveLFO.model_validate(
+    definition = TypeAdapter(envelfo.Generator).validate_python(
         {
-            'clock': 'beats',
-            'body': {
-                'kind': 'patch',
-                'envelfos': {
-                    'source': {
-                        'kind': 'stages',
-                        'initial_stage': 'waiting',
-                        'stages': [
-                            {
-                                'name': 'waiting',
-                                'envelfo': {'kind': 'hold', 'value': 0},
-                            },
-                        ],
-                        'transitions': [
-                            {
-                                'from': ['waiting'],
-                                'event': 'cue.finish',
-                                'action': {'kind': 'finish'},
-                            }
-                        ],
-                    },
-                    'held': {'kind': 'sample_hold'},
+            'kind': 'patch',
+            'envelfos': {
+                'source': {
+                    'kind': 'stages',
+                    'initial_stage': 'waiting',
+                    'stages': [
+                        {'name': 'waiting', 'envelfo': {'kind': 'hold', 'value': 0}}
+                    ],
+                    'transitions': [
+                        {
+                            'from': ['waiting'],
+                            'event': 'cue.finish',
+                            'action': {'kind': 'finish'},
+                        }
+                    ],
                 },
-                'outputs': {'value': 'held'},
-                'event_outputs': {'done': 'source.done'},
-                'events': [
-                    {
-                        'source': 'source.done',
-                        'target': 'held',
-                        'action': 'sample',
-                        'delay': '1/10',
-                    }
-                ],
+                'held': {'kind': 'sample_hold'},
             },
+            'outputs': {'value': 'held'},
+            'event_outputs': {'done': 'source.done'},
+            'events': [
+                {
+                    'source': 'source.done',
+                    'target': 'held',
+                    'action': 'sample',
+                    'delay': '1/10',
+                }
+            ],
+            'clock': 'beats',
         }
     )
     tempo = control.TempoMap(

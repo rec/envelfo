@@ -29,7 +29,7 @@ fn patch_orchestration_matches_shared_observation_and_delivery_traces() {
     let corpus: Value =
         serde_json::from_str(include_str!("../../../conformance/envelfo-patch.json")).unwrap();
     for case in corpus["cases"].as_array().unwrap() {
-        let definition = patch_definition(&case["definition"]["body"]);
+        let definition = patch_definition(&case["definition"]);
         let mut state = definition
             .initial(Time::ZERO, "patch", 0, &patch::Seconds)
             .unwrap();
@@ -69,7 +69,7 @@ fn patch_orchestration_matches_shared_observation_and_delivery_traces() {
 #[test]
 fn envelopes_and_stages_match_every_shared_trace() {
     for case in corpus()["cases"].as_array().unwrap() {
-        let body = &case["definition"]["body"];
+        let body = &case["definition"];
         match body["kind"].as_str().unwrap() {
             "envelope" => {
                 let envelope = envelope(body);
@@ -234,7 +234,7 @@ fn check_lfo(name: &str) {
         .find(|c| c["name"] == name)
         .unwrap();
     let definition = &case["definition"];
-    let body = &definition["body"];
+    let body = definition;
     assert_eq!(body["kind"], "lfo");
     assert!(
         body["markers"].is_null() || body["markers"].as_array().unwrap().is_empty(),

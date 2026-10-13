@@ -55,7 +55,7 @@ def transform_value(
 
 
 def lfo_definition(definition: envelfo.EnveLFO) -> lfo.LFO:
-    body = definition.body
+    body = definition
     if not isinstance(body, envelfo.LFO):
         raise ValueError('envelfo is not an LFO')
     if isinstance(body.rate, envelfo.ParameterReference):
@@ -73,55 +73,31 @@ def lfo_definition(definition: envelfo.EnveLFO) -> lfo.LFO:
     )
 
 
-def envelope_envelope(definition: envelfo.EnveLFO) -> envelope.VoiceEnvelope:
-    body = definition.body
-    if not isinstance(body, envelfo.Envelope):
-        raise ValueError('envelfo is not a envelope')
-    if body.playback != envelfo.PlaybackMode.once:
-        raise ValueError('looping envelopes cannot be converted to envelopes')
-    if body.initial == 'current':
-        raise ValueError('envelope current value needs stage entry')
-    return envelope.VoiceEnvelope(
-        clock=definition.clock,
-        scope=definition.scope,
-        polarity=body.polarity,
-        initial=body.initial,
-        segments=body.segments,
-        release=body.release
-        or [segments.Segment(duration=Fraction(0), to=body.segments[-1].to)],
-        hold=body.hold if body.release else False,
-        retrigger=body.retrigger,
-    )
-
-
 def initial_envelfo(
     definition: envelfo.EnveLFO, at: Fraction, *, seed: int = 0
 ) -> envelfo.EnvelfoState:
-    if isinstance(definition.body, envelfo.SampleHold):
+    if isinstance(definition, envelfo.SampleHold):
         random_state, word = random.random_word(seed)
         return envelfo.EnvelfoState(
             runtime=envelfo.SampleHoldState(
                 at=at,
-                value=definition.body.minimum
-                + (definition.body.maximum - definition.body.minimum)
-                * ((word >> 11) / 2**53),
+                value=definition.minimum
+                + (definition.maximum - definition.minimum) * ((word >> 11) / 2**53),
                 random_state=random_state,
             )
         )
-    if isinstance(definition.body, envelfo.LFO):
-        assert isinstance(definition.body.rate, Fraction)
+    if isinstance(definition, envelfo.LFO):
+        assert isinstance(definition.rate, Fraction)
         return envelfo.EnvelfoState(
             runtime=envelfo.LFOState(
                 at=at,
                 position=envelfo.EnvelfoPosition(
-                    at=at, coordinate=definition.body.phase, rate=definition.body.rate
+                    at=at, coordinate=definition.phase, rate=definition.rate
                 ),
             )
         )
-    if isinstance(definition.body, envelfo.Stages):
-        stage = next(
-            s for s in definition.body.stages if s.name == definition.body.initial_stage
-        )
+    if isinstance(definition, envelfo.Stages):
+        stage = next(s for s in definition.stages if s.name == definition.initial_stage)
         initial = (
             stage.envelfo.initial
             if isinstance(stage.envelfo, envelfo.Envelope)
@@ -136,22 +112,19 @@ def initial_envelfo(
                 position=_initial_position(stage.envelfo, at),
             )
         )
-    if not isinstance(definition.body, envelfo.Envelope):
+    if not isinstance(definition, envelfo.Envelope):
         raise ValueError('envelfo reference must be materialized before use')
-    assert isinstance(definition.body.initial, float)
+    if not isinstance(definition.initial, float):
+        raise ValueError('current envelope initial requires a parent stage')
     return envelfo.EnvelfoState(
         runtime=envelfo.EnvelopeState(
             at=at,
-            phase=(
-                'idle'
-                if definition.body.release or definition.body.start == 'event'
-                else 'on'
-            ),
-            start_value=definition.body.initial,
-            position=_initial_position(definition.body, at).model_copy(
+            phase='idle' if definition.release or definition.start == 'event' else 'on',
+            start_value=definition.initial,
+            position=_initial_position(definition, at).model_copy(
                 update={
                     'coordinate': Fraction(1)
-                    if not sum(s.duration for s in definition.body.segments)
+                    if not sum(s.duration for s in definition.segments)
                     else Fraction(0)
                 }
             ),
@@ -162,7 +135,7 @@ def initial_envelfo(
 def envelfo_at(
     definition: envelfo.EnveLFO, state: envelfo.EnvelfoState, at: Fraction
 ) -> envelfo.EnvelfoValue:
-    if isinstance(definition.body, envelfo.SampleHold) and isinstance(
+    if isinstance(definition, envelfo.SampleHold) and isinstance(
         state.runtime, envelfo.SampleHoldState
     ):
         if at < state.runtime.at:
@@ -170,52 +143,50 @@ def envelfo_at(
         return envelfo.EnvelfoValue(
             value=state.runtime.value, weight=1.0, status='held'
         )
-    if isinstance(definition.body, envelfo.LFO) and isinstance(
+    if isinstance(definition, envelfo.LFO) and isinstance(
         state.runtime, envelfo.LFOState
     ):
         position = state.runtime.position
         if definition.position_driver == envelfo.PositionDriver.transport:
-            assert isinstance(definition.body.rate, Fraction)
+            assert isinstance(definition.rate, Fraction)
             return envelfo.EnvelfoValue(
-                value=definition.body.center
-                + definition.body.depth
+                value=definition.center
+                + definition.depth
                 * oscillator.shape_value(
-                    definition.body.shape,
-                    (definition.body.phase + definition.body.rate * at) % 1,
-                    definition.body.duty_cycle,
+                    definition.shape,
+                    (definition.phase + definition.rate * at) % 1,
+                    definition.duty_cycle,
                 ),
                 weight=1.0,
                 status='running',
             )
         coordinate = _coordinate_at(position, at)
         age = _age_at(position, at)
-        if age < definition.body.delay:
+        if age < definition.delay:
             weight = 0.0
-        elif definition.body.fade_in:
+        elif definition.fade_in:
             weight = float(
-                min(
-                    Fraction(1), (age - definition.body.delay) / definition.body.fade_in
-                )
+                min(Fraction(1), (age - definition.delay) / definition.fade_in)
             )
         else:
             weight = 1.0
         return envelfo.EnvelfoValue(
-            value=definition.body.center
-            + definition.body.depth
+            value=definition.center
+            + definition.depth
             * oscillator.shape_value(
-                definition.body.shape, coordinate % 1, definition.body.duty_cycle
+                definition.shape, coordinate % 1, definition.duty_cycle
             ),
             weight=weight,
             status='running',
         )
-    if isinstance(definition.body, envelfo.Stages) and isinstance(
+    if isinstance(definition, envelfo.Stages) and isinstance(
         state.runtime, envelfo.StageState
     ):
         return advance_envelfo(definition, state, at).value
-    if isinstance(definition.body, envelfo.Envelope) and isinstance(
+    if isinstance(definition, envelfo.Envelope) and isinstance(
         state.runtime, envelfo.EnvelopeState
     ):
-        return _envelope_value(definition.body, state.runtime, at)
+        return _envelope_value(definition, state.runtime, at)
     raise ValueError('envelfo state does not match its definition')
 
 
@@ -224,7 +195,7 @@ def envelfo_event(
     state: envelfo.EnvelfoState,
     event: envelfo.EnvelfoEvent,
 ) -> envelfo.EnvelfoState:
-    if isinstance(definition.body, envelfo.SampleHold) and isinstance(
+    if isinstance(definition, envelfo.SampleHold) and isinstance(
         state.runtime, envelfo.SampleHoldState
     ):
         control.check_order(state.runtime.at, state.runtime.ordinal, event)
@@ -244,8 +215,8 @@ def envelfo_event(
             random_state, word = random.random_word(runtime.random_state)
             runtime = runtime.model_copy(
                 update={
-                    'value': definition.body.minimum
-                    + (definition.body.maximum - definition.body.minimum)
+                    'value': definition.minimum
+                    + (definition.maximum - definition.minimum)
                     * ((word >> 11) / 2**53),
                     'random_state': random_state,
                 }
@@ -257,11 +228,11 @@ def envelfo_event(
         )
     if definition.position_driver == envelfo.PositionDriver.transport:
         raise ValueError('transport-position LFO does not accept phase commands')
-    if isinstance(definition.body, envelfo.Stages) and isinstance(
+    if isinstance(definition, envelfo.Stages) and isinstance(
         state.runtime, envelfo.StageState
     ):
         return advance_envelfo(definition, state, event.at, event).state
-    if isinstance(definition.body, envelfo.LFO) and isinstance(
+    if isinstance(definition, envelfo.LFO) and isinstance(
         state.runtime, envelfo.LFOState
     ):
         if event.action == 'cue':
@@ -273,17 +244,14 @@ def envelfo_event(
         if event.action in ('note_on', 'reset', 'transport'):
             if (
                 event.action == 'reset'
-                or (
-                    event.action == 'note_on'
-                    and definition.body.reset == lfo.Reset.trigger
-                )
+                or (event.action == 'note_on' and definition.reset == lfo.Reset.trigger)
                 or (
                     event.action == 'transport'
-                    and definition.body.reset == lfo.Reset.transport
+                    and definition.reset == lfo.Reset.transport
                 )
             ):
                 position = position.model_copy(
-                    update={'coordinate': definition.body.phase, 'age': Fraction(0)}
+                    update={'coordinate': definition.phase, 'age': Fraction(0)}
                 )
         else:
             position = _position_command(position, event)
@@ -292,7 +260,7 @@ def envelfo_event(
                 at=event.at, ordinal=event.ordinal, position=position
             )
         )
-    if isinstance(definition.body, envelfo.Envelope) and isinstance(
+    if isinstance(definition, envelfo.Envelope) and isinstance(
         state.runtime, envelfo.EnvelopeState
     ):
         if event.action in ('cue', 'reset', 'transport', 'rate', 'sample'):
@@ -307,31 +275,31 @@ def envelfo_event(
         if (
             phase == 'on'
             and complete_coordinate is None
-            and definition.body.repeat_count is not None
+            and definition.repeat_count is not None
         ):
             crossed, boundary = _repeat_crossings(
-                definition.body,
+                definition,
                 runtime.position,
                 event.at,
-                definition.body.repeat_count - traversals,
+                definition.repeat_count - traversals,
             )
             traversals += crossed
             if boundary is not None:
                 position = position.model_copy(update={'coordinate': boundary})
                 complete_coordinate = _repeat_boundary_coordinate(
-                    definition.body, boundary, runtime.position.direction
+                    definition, boundary, runtime.position.direction
                 )
-        observed = _envelope_value(definition.body, runtime, event.at)
+        observed = _envelope_value(definition, runtime, event.at)
         if event.action == 'start' or (
-            event.action == 'note_on' and definition.body.start == 'activation'
+            event.action == 'note_on' and definition.start == 'activation'
         ):
             active = observed.status in ('running', 'held')
-            if not active or definition.body.retrigger != envelope.Retrigger.ignore:
-                assert isinstance(definition.body.initial, float)
+            if not active or definition.retrigger != envelope.Retrigger.ignore:
+                assert isinstance(definition.initial, float)
                 start_value = (
                     observed.value
-                    if definition.body.retrigger == envelope.Retrigger.current
-                    else definition.body.initial
+                    if definition.retrigger == envelope.Retrigger.current
+                    else definition.initial
                 )
                 phase = 'on'
                 traversals = 0
@@ -340,29 +308,24 @@ def envelfo_event(
                     update={
                         'coordinate': Fraction(0),
                         'age': Fraction(0),
-                        'rate': _envelope_rate(definition.body.segments),
+                        'rate': _envelope_rate(definition.segments),
                     }
                 )
         elif event.action == 'note_off':
-            if (
-                definition.body.release
-                and phase == 'on'
-                and observed.status != 'complete'
-            ):
+            if definition.release and phase == 'on' and observed.status != 'complete':
                 phase = 'release'
                 start_value = observed.value
                 position = position.model_copy(
                     update={
                         'coordinate': Fraction(0),
                         'age': Fraction(0),
-                        'rate': _envelope_rate(definition.body.release),
+                        'rate': _envelope_rate(definition.release),
                     }
                 )
         else:
             position = _position_command(position, event)
             if event.action == 'shift' and (
-                phase == 'release'
-                or definition.body.playback == envelfo.PlaybackMode.once
+                phase == 'release' or definition.playback == envelfo.PlaybackMode.once
             ):
                 position = position.model_copy(
                     update={
@@ -392,7 +355,7 @@ def advance_envelfo(
     event: envelfo.EnvelfoEvent | None = None,
 ) -> envelfo.EnvelfoAdvance:
     """Advance a staged Envelfo, returning its state and ordered output events."""
-    body = definition.body
+    body = definition
     runtime = state.runtime
     if not isinstance(body, envelfo.Stages) or not isinstance(
         runtime, envelfo.StageState

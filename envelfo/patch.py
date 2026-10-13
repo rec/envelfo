@@ -188,9 +188,9 @@ def patch_event(
 
 
 def _body(definition: envelfo.EnveLFO) -> envelfo.Patch:
-    if not isinstance(definition.body, envelfo.Patch):
+    if not isinstance(definition, envelfo.Patch):
         raise ValueError('Patch execution requires a materialized Patch')
-    return definition.body
+    return definition
 
 
 def _child(definition: envelfo.EnveLFO, name: str) -> envelfo.EnveLFO:
@@ -199,11 +199,7 @@ def _child(definition: envelfo.EnveLFO, name: str) -> envelfo.EnveLFO:
         body, (envelfo.LFO, envelfo.Envelope, envelfo.Stages, envelfo.SampleHold)
     ):
         raise ValueError('commands require an executable Patch child')
-    return envelfo.EnveLFO(
-        scope=definition.scope,
-        clock=definition.clock,
-        body=body,
-    )
+    return body
 
 
 def _clock(
@@ -296,7 +292,7 @@ def _command(
     current = state.children[target]
     local = event.model_copy(update={'at': _clock(definition, event.at, tempo_map)})
     emitted: list[envelfo.EnvelfoOutputEvent] = []
-    if isinstance(child.body, envelfo.Stages):
+    if isinstance(child, envelfo.Stages):
         result = runtime.advance_envelfo(child, current, local.at, local)
         state.children[target] = result.state
         for output in result.events:

@@ -1,9 +1,9 @@
 from fractions import Fraction
 
 import pytest
-from pydantic import ValidationError
+from pydantic import TypeAdapter, ValidationError
 from ufor.control import TempoMap
-from ufor.envelfo import EnveLFO, EnvelfoEvent, Envelope
+from ufor.envelfo import EnvelfoEvent, Envelope, Generator
 from ufor.segments import Segment
 
 from envelfo.runtime import envelfo_at, envelfo_event, initial_envelfo
@@ -18,18 +18,14 @@ def test_beat_envelope_follows_host_tempo_and_preserves_authored_unit() -> None:
             ]
         }
     )
-    envelfo = EnveLFO.model_validate(
+    envelfo = TypeAdapter(Generator).validate_python(
         {
+            'kind': 'envelope',
+            'segments': [{'duration': '4 beat', 'to': 1}],
             'clock': 'beats',
-            'body': {
-                'kind': 'envelope',
-                'segments': [{'duration': '4 beat', 'to': 1}],
-            },
         }
     )
-    assert (
-        envelfo.model_dump(mode='json')['body']['segments'][0]['duration'] == '4 beat'
-    )
+    assert envelfo.model_dump(mode='json')['segments'][0]['duration'] == '4 beat'
     state = envelfo_event(
         envelfo,
         initial_envelfo(envelfo, Fraction(0)),
@@ -37,15 +33,13 @@ def test_beat_envelope_follows_host_tempo_and_preserves_authored_unit() -> None:
     )
     assert envelfo_at(envelfo, state, clock.beat_at(Fraction(1))).value == 0.5
     assert envelfo_at(envelfo, state, clock.beat_at(Fraction(2))).value == 0.75
-    assert isinstance(envelfo.body, Envelope)
+    assert isinstance(envelfo, Envelope)
     with pytest.raises(ValidationError, match='must match its clock'):
-        EnveLFO.model_validate(
+        TypeAdapter(Generator).validate_python(
             {
+                'kind': 'envelope',
+                'segments': [{'duration': '4 s', 'to': 1}],
                 'clock': 'beats',
-                'body': {
-                    'kind': 'envelope',
-                    'segments': [{'duration': '4 s', 'to': 1}],
-                },
             }
         )
     with pytest.raises(ValidationError, match='conflicts with its suffix'):
