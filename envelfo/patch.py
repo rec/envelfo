@@ -114,7 +114,7 @@ def initial_patch(
         )
         for n, b in body.envelfos.items()
         if isinstance(
-            b, (envelfo.LFO, envelfo.Contour, envelfo.Stages, envelfo.SampleHold)
+            b, (envelfo.LFO, envelfo.Envelope, envelfo.Stages, envelfo.SampleHold)
         )
     }
     return PatchState(at=at, name=name, seed=seed, children=children)
@@ -196,7 +196,7 @@ def _body(definition: envelfo.EnvelfoUse) -> envelfo.Patch:
 def _child(definition: envelfo.EnvelfoUse, name: str) -> envelfo.EnvelfoUse:
     body = _body(definition).envelfos[name]
     if not isinstance(
-        body, (envelfo.LFO, envelfo.Contour, envelfo.Stages, envelfo.SampleHold)
+        body, (envelfo.LFO, envelfo.Envelope, envelfo.Stages, envelfo.SampleHold)
     ):
         raise ValueError('commands require an executable Patch child')
     return envelfo.EnvelfoUse(

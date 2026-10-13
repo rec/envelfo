@@ -1,4 +1,4 @@
-//! Normalized contour definitions and exact attack/release playback.
+//! Normalized envelope definitions and exact attack/release playback.
 
 use crate::lfo::{Command, Direction, Value};
 use crate::playback::{Position, check_order};
@@ -45,7 +45,7 @@ pub enum Start {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct Contour {
+pub struct Envelope {
     pub initial: Initial,
     pub segments: Vec<Segment>,
     pub release: Vec<Segment>,
@@ -60,9 +60,9 @@ pub struct Contour {
     pub repeat_count: Option<u64>,
 }
 
-impl Contour {
+impl Envelope {
     pub fn new(initial: f64, segments: Vec<Segment>) -> Result<Self, Error> {
-        let contour = Self {
+        let envelope = Self {
             initial: Initial::Value(initial),
             segments,
             release: vec![],
@@ -75,8 +75,8 @@ impl Contour {
             loop_bounds: None,
             repeat_count: None,
         };
-        contour.validate()?;
-        Ok(contour)
+        envelope.validate()?;
+        Ok(envelope)
     }
 
     pub fn validate(&self) -> Result<(), Error> {
@@ -91,7 +91,7 @@ impl Contour {
                 .any(|s| s.duration < Time::ZERO || !valid_level(s.to) || !s.curve.is_finite())
         {
             return Err(Error::InvalidDefinition(
-                "invalid Contour levels or segments",
+                "invalid Envelope levels or segments",
             ));
         }
         validate_markers(&self.markers, true)?;
@@ -112,7 +112,7 @@ impl Contour {
                 || self.markers.iter().any(|m| m.position > end)
             {
                 return Err(Error::InvalidDefinition(
-                    "invalid named Contour loop bounds",
+                    "invalid named Envelope loop bounds",
                 ));
             }
         }
@@ -121,7 +121,7 @@ impl Contour {
         Ok(())
     }
 
-    pub fn initial(&self, at: Time) -> Result<ContourState, Error> {
+    pub fn initial(&self, at: Time) -> Result<EnvelopeState, Error> {
         self.validate()?;
         let Initial::Value(value) = self.initial else {
             return Err(Error::InvalidDefinition(
@@ -129,7 +129,7 @@ impl Contour {
             ));
         };
         let rate = rate(&self.segments)?;
-        Ok(ContourState {
+        Ok(EnvelopeState {
             position: Position::new(
                 at,
                 if rate == Time::ZERO {
@@ -151,7 +151,7 @@ impl Contour {
         })
     }
 
-    pub fn value(&self, state: &ContourState, at: Time) -> Result<Value, Error> {
+    pub fn value(&self, state: &EnvelopeState, at: Time) -> Result<Value, Error> {
         if state.phase == Phase::Idle {
             return Ok(Value {
                 value: state.start_value,
@@ -199,10 +199,10 @@ impl Contour {
     /// Clone-based updates are transactional: an error never partially changes state.
     pub fn command(
         &self,
-        state: &mut ContourState,
+        state: &mut EnvelopeState,
         at: Time,
         ordinal: u64,
-        command: ContourCommand,
+        command: EnvelopeCommand,
     ) -> Result<(), Error> {
         check_order(state.position.at, state.ordinal, at, ordinal)?;
         let observed = self.value(state, at)?;
@@ -217,8 +217,8 @@ impl Contour {
         }
         next.position = state.position.advanced(at)?;
         match command {
-            ContourCommand::Start | ContourCommand::Playback(Command::NoteOn)
-                if command == ContourCommand::Start || self.start == Start::Activation =>
+            EnvelopeCommand::Start | EnvelopeCommand::Playback(Command::NoteOn)
+                if command == EnvelopeCommand::Start || self.start == Start::Activation =>
             {
                 if !matches!(observed.status, Status::Running | Status::Held)
                     || self.retrigger != Retrigger::Ignore
@@ -243,7 +243,7 @@ impl Contour {
                     next.position.rate = rate(&self.segments)?;
                 }
             }
-            ContourCommand::Playback(Command::NoteOff) => {
+            EnvelopeCommand::Playback(Command::NoteOff) => {
                 if !self.release.is_empty()
                     && next.phase == Phase::On
                     && observed.status != Status::Complete
@@ -255,8 +255,8 @@ impl Contour {
                     next.position.rate = rate(&self.release)?;
                 }
             }
-            ContourCommand::Playback(Command::NoteOn) => {}
-            ContourCommand::Playback(
+            EnvelopeCommand::Playback(Command::NoteOn) => {}
+            EnvelopeCommand::Playback(
                 c @ (Command::Pause
                 | Command::Resume
                 | Command::Reverse
@@ -271,7 +271,7 @@ impl Contour {
                         next.position.coordinate.clamp(Time::ZERO, Time::ONE);
                 }
             }
-            _ => return Err(Error::Unsupported("unsupported Contour command")),
+            _ => return Err(Error::Unsupported("unsupported Envelope command")),
         }
         next.ordinal = Some(ordinal);
         *state = next;
@@ -327,7 +327,7 @@ impl Contour {
         }
     }
 
-    fn completion(&self, state: &ContourState, at: Time) -> Result<(u64, Option<Time>), Error> {
+    fn completion(&self, state: &EnvelopeState, at: Time) -> Result<(u64, Option<Time>), Error> {
         let Some(count) = self.repeat_count else {
             return Ok((0, None));
         };
@@ -394,7 +394,7 @@ impl Contour {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ContourCommand {
+pub enum EnvelopeCommand {
     Start,
     Playback(Command),
 }
@@ -407,7 +407,7 @@ pub enum Phase {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct ContourState {
+pub struct EnvelopeState {
     position: Position,
     pub(crate) ordinal: Option<u64>,
     phase: Phase,
@@ -416,7 +416,7 @@ pub struct ContourState {
     complete_coordinate: Option<Time>,
 }
 
-impl ContourState {
+impl EnvelopeState {
     pub fn phase(&self) -> Phase {
         self.phase
     }

@@ -1,5 +1,5 @@
 use envelfo_core::Error;
-use envelfo_core::contour::{Contour, Segment, Start};
+use envelfo_core::envelope::{Envelope, Segment, Start};
 use envelfo_core::lfo::{Command, LFO, Shape};
 use envelfo_core::patch::{
     Child, ChildCommand, ChildEvent, ClockMapping, Connection, ConnectionAction, EventOutput, Node,
@@ -316,7 +316,7 @@ fn slew_uses_seconds_while_transport_is_stopped_and_cues_keep_host_timestamps() 
 fn same_time_connections_follow_declaration_order_not_target_name_order() {
     let mut body = clock_patch(ConnectionAction::Start);
     body.children
-        .push(child("another", Node::Contour(attack())));
+        .push(child("another", Node::Envelope(attack())));
     body.connections.push(Connection {
         target: "another".into(),
         ..body.connections[0].clone()
@@ -617,7 +617,7 @@ fn clock_patch(action: ConnectionAction) -> Patch {
     let mut lfo = LFO::new(Time::ONE).unwrap();
     lfo.shape = Shape::Triangle;
     let held = if action == ConnectionAction::Start {
-        Node::Contour(attack())
+        Node::Envelope(attack())
     } else {
         Node::SampleHold(SampleHold {
             minimum: 0.0,
@@ -630,7 +630,7 @@ fn clock_patch(action: ConnectionAction) -> Patch {
                 "clock",
                 Node::LFO {
                     body: lfo,
-                    markers: vec![envelfo_core::contour::Marker {
+                    markers: vec![envelfo_core::envelope::Marker {
                         name: "tick".into(),
                         position: t(1, 4),
                     }],
@@ -678,8 +678,8 @@ fn staged_patch() -> Patch {
         stages: vec![
             stage(
                 "on",
-                Body::Contour(
-                    Contour::new(
+                Body::Envelope(
+                    Envelope::new(
                         0.0,
                         vec![Segment {
                             duration: t(1, 2),
@@ -704,8 +704,8 @@ fn staged_patch() -> Patch {
             stage("waiting", Body::Hold(0.0)),
             stage(
                 "high",
-                Body::Contour(
-                    Contour::new(
+                Body::Envelope(
+                    Envelope::new(
                         1.0,
                         vec![Segment {
                             duration: t(1, 10),
@@ -750,8 +750,8 @@ fn staged_patch() -> Patch {
         }],
     }
 }
-fn attack() -> Contour {
-    let mut contour = Contour::new(
+fn attack() -> Envelope {
+    let mut envelope = Envelope::new(
         0.0,
         vec![Segment {
             duration: t(1, 2),
@@ -760,8 +760,8 @@ fn attack() -> Contour {
         }],
     )
     .unwrap();
-    contour.start = Start::Event;
-    contour
+    envelope.start = Start::Event;
+    envelope
 }
 fn stage(name: &str, body: Body) -> Stage {
     Stage {

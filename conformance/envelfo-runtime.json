@@ -50,8 +50,8 @@
       ]
     },
     {
-      "name": "contour-holds-and-releases-current-level",
-      "definition": {"body": {"kind": "contour", "segments": [{"duration": "1 s", "to": 1}], "release": [{"duration": "1 s", "to": 0}]}},
+      "name": "envelope-holds-and-releases-current-level",
+      "definition": {"body": {"kind": "envelope", "segments": [{"duration": "1 s", "to": 1}], "release": [{"duration": "1 s", "to": 0}]}},
       "steps": [
         {"at": "0", "expected": {"value": 0, "weight": 1, "status": "idle"}},
         {"at": "0", "event": {"at": "0", "ordinal": 0, "action": "note_on"}, "expected": {"value": 0, "weight": 1, "status": "running"}},
@@ -65,9 +65,9 @@
     {
       "name": "note-off-at-stage-end-preempts-natural-completion",
       "definition": {"body": {"kind": "stages", "initial_stage": "attack", "stages": [
-        {"name": "attack", "envelfo": {"kind": "contour", "segments": [{"duration": "1/4 s", "to": 1}]}},
+        {"name": "attack", "envelfo": {"kind": "envelope", "segments": [{"duration": "1/4 s", "to": 1}]}},
         {"name": "held", "envelfo": {"kind": "hold", "value": 1}},
-        {"name": "release", "envelfo": {"kind": "contour", "initial": "current", "segments": [{"duration": "1/4 s", "to": 0}]}}
+        {"name": "release", "envelfo": {"kind": "envelope", "initial": "current", "segments": [{"duration": "1/4 s", "to": 0}]}}
       ], "transitions": [
         {"from": ["attack"], "event": "stage.done", "action": {"kind": "enter", "stage": "held"}},
         {"from": ["attack", "held"], "event": "note_off", "action": {"kind": "enter", "stage": "release"}},
@@ -96,7 +96,7 @@
     },
     {
       "name": "named-loop-final-crossing-orders-marker-cycle-and-done",
-      "definition": {"body": {"kind": "stages", "initial_stage": "sweep", "stages": [{"name": "sweep", "envelfo": {"kind": "contour", "segments": [{"duration": "1 s", "to": 1}], "playback": "loop", "loop_start": "lower", "loop_end": "upper", "repeat_count": 1, "markers": [{"name": "lower", "position": "1/4"}, {"name": "upper", "position": "3/4"}]}}]}},
+      "definition": {"body": {"kind": "stages", "initial_stage": "sweep", "stages": [{"name": "sweep", "envelfo": {"kind": "envelope", "segments": [{"duration": "1 s", "to": 1}], "playback": "loop", "loop_start": "lower", "loop_end": "upper", "repeat_count": 1, "markers": [{"name": "lower", "position": "1/4"}, {"name": "upper", "position": "3/4"}]}}]}},
       "steps": [
         {"at": "1/4", "expected": {"value": 0.25, "weight": 1, "status": "running"}, "events": [{"at": "1/4", "port": "lower", "stage": "sweep", "activation": 0}]},
         {"at": "3/4", "restore": true, "expected": {"value": 0.75, "weight": 1, "status": "complete"}, "events": [

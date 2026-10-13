@@ -1,5 +1,5 @@
-use envelfo_core::contour::{
-    Contour, ContourCommand, Initial, Marker, Playback, Retrigger, Segment, Start,
+use envelfo_core::envelope::{
+    Envelope, EnvelopeCommand, Initial, Marker, Playback, Retrigger, Segment, Start,
 };
 use envelfo_core::lfo::{Command, Direction};
 use envelfo_core::time::Time;
@@ -20,14 +20,14 @@ fn release_captures_the_in_flight_level_and_retrigger_policy_is_explicit() {
             &mut state,
             Time::ZERO,
             0,
-            ContourCommand::Playback(Command::NoteOn),
+            EnvelopeCommand::Playback(Command::NoteOn),
         )
         .unwrap();
         body.command(
             &mut state,
             t(1, 2),
             0,
-            ContourCommand::Playback(Command::NoteOff),
+            EnvelopeCommand::Playback(Command::NoteOff),
         )
         .unwrap();
         assert_eq!(body.value(&state, t(3, 4)).unwrap().value, 0.375);
@@ -35,7 +35,7 @@ fn release_captures_the_in_flight_level_and_retrigger_policy_is_explicit() {
             &mut state,
             Time::ONE,
             0,
-            ContourCommand::Playback(Command::NoteOn),
+            EnvelopeCommand::Playback(Command::NoteOn),
         )
         .unwrap();
         assert_eq!(body.value(&state, Time::ONE).unwrap().value, expected);
@@ -51,7 +51,7 @@ fn release_captures_the_in_flight_level_and_retrigger_policy_is_explicit() {
 }
 
 #[test]
-fn event_started_contour_ignores_note_on_until_explicit_start() {
+fn event_started_envelope_ignores_note_on_until_explicit_start() {
     let mut body = ramp();
     body.start = Start::Event;
     let mut state = body.initial(Time::ZERO).unwrap();
@@ -59,11 +59,11 @@ fn event_started_contour_ignores_note_on_until_explicit_start() {
         &mut state,
         Time::ONE,
         0,
-        ContourCommand::Playback(Command::NoteOn),
+        EnvelopeCommand::Playback(Command::NoteOn),
     )
     .unwrap();
     assert_eq!(body.value(&state, Time::ONE).unwrap().status, Status::Idle);
-    body.command(&mut state, Time::ONE, 1, ContourCommand::Start)
+    body.command(&mut state, Time::ONE, 1, EnvelopeCommand::Start)
         .unwrap();
     assert_eq!(body.value(&state, t(3, 2)).unwrap().value, 0.5);
 }
@@ -71,7 +71,7 @@ fn event_started_contour_ignores_note_on_until_explicit_start() {
 #[test]
 fn zero_length_segments_apply_immediately_and_curves_stay_finite() {
     for curve in [-1000.0, -4.0, 0.0, 4.0, 1000.0] {
-        let body = Contour::new(
+        let body = Envelope::new(
             0.0,
             vec![
                 segment(Time::ZERO, 0.25),
@@ -94,7 +94,7 @@ fn zero_length_segments_apply_immediately_and_curves_stay_finite() {
         assert!((value - expected).abs() < 1e-12);
         assert_eq!(body.value(&state, Time::ONE).unwrap().value, 1.0);
     }
-    let body = Contour::new(0.0, vec![segment(Time::ZERO, 1.0)]).unwrap();
+    let body = Envelope::new(0.0, vec![segment(Time::ZERO, 1.0)]).unwrap();
     let state = body.initial(Time::ZERO).unwrap();
     assert_eq!(
         body.value(&state, Time::ZERO).unwrap().status,
@@ -110,7 +110,7 @@ fn pause_reverse_seek_and_shift_preserve_exact_playback() {
         &mut state,
         t(1, 4),
         0,
-        ContourCommand::Playback(Command::Pause),
+        EnvelopeCommand::Playback(Command::Pause),
     )
     .unwrap();
     assert_eq!(body.value(&state, Time::ONE).unwrap().value, 0.25);
@@ -118,14 +118,14 @@ fn pause_reverse_seek_and_shift_preserve_exact_playback() {
         &mut state,
         Time::ONE,
         0,
-        ContourCommand::Playback(Command::Resume),
+        EnvelopeCommand::Playback(Command::Resume),
     )
     .unwrap();
     body.command(
         &mut state,
         Time::ONE,
         1,
-        ContourCommand::Playback(Command::Reverse),
+        EnvelopeCommand::Playback(Command::Reverse),
     )
     .unwrap();
     assert_eq!(body.value(&state, t(9, 8)).unwrap().value, 0.125);
@@ -133,14 +133,14 @@ fn pause_reverse_seek_and_shift_preserve_exact_playback() {
         &mut state,
         t(9, 8),
         0,
-        ContourCommand::Playback(Command::Seek(t(3, 4))),
+        EnvelopeCommand::Playback(Command::Seek(t(3, 4))),
     )
     .unwrap();
     body.command(
         &mut state,
         t(9, 8),
         1,
-        ContourCommand::Playback(Command::Shift(Time::ONE)),
+        EnvelopeCommand::Playback(Command::Shift(Time::ONE)),
     )
     .unwrap();
     assert_eq!(body.value(&state, t(9, 8)).unwrap().value, 1.0);
@@ -159,7 +159,7 @@ fn finite_repeats_count_actual_forward_and_reverse_crossings() {
                     &mut state,
                     Time::ZERO,
                     0,
-                    ContourCommand::Playback(Command::Reverse),
+                    EnvelopeCommand::Playback(Command::Reverse),
                 )
                 .unwrap();
             }
@@ -178,14 +178,14 @@ fn finite_repeats_count_actual_forward_and_reverse_crossings() {
                 &mut state,
                 Time::ONE,
                 1,
-                ContourCommand::Playback(Command::Pause),
+                EnvelopeCommand::Playback(Command::Pause),
             )
             .unwrap();
             body.command(
                 &mut state,
                 Time::from_integer(2),
                 0,
-                ContourCommand::Playback(Command::Resume),
+                EnvelopeCommand::Playback(Command::Resume),
             )
             .unwrap();
             assert_eq!(body.value(&state, Time::from_integer(3)).unwrap(), value);
@@ -222,7 +222,7 @@ fn invalid_commands_and_time_overflow_leave_snapshot_unchanged() {
         Command::Seek(Time::from_integer(2)),
     ] {
         assert!(
-            body.command(&mut state, t(1, 4), 0, ContourCommand::Playback(command))
+            body.command(&mut state, t(1, 4), 0, EnvelopeCommand::Playback(command))
                 .is_err()
         );
         assert_eq!(state, saved);
@@ -231,7 +231,7 @@ fn invalid_commands_and_time_overflow_leave_snapshot_unchanged() {
         &mut state,
         t(1, 4),
         0,
-        ContourCommand::Playback(Command::Pause),
+        EnvelopeCommand::Playback(Command::Pause),
     )
     .unwrap();
     let saved = state.clone();
@@ -240,7 +240,7 @@ fn invalid_commands_and_time_overflow_leave_snapshot_unchanged() {
             &mut state,
             t(1, 4),
             0,
-            ContourCommand::Playback(Command::Resume)
+            EnvelopeCommand::Playback(Command::Resume)
         ),
         Err(Error::EventOrder)
     );
@@ -254,7 +254,7 @@ fn invalid_commands_and_time_overflow_leave_snapshot_unchanged() {
             &mut state,
             Time::from_integer(i64::MAX),
             0,
-            ContourCommand::Playback(Command::Pause)
+            EnvelopeCommand::Playback(Command::Pause)
         ),
         Err(Error::Overflow)
     );
@@ -276,8 +276,8 @@ fn current_initial_requires_stage_entry_and_definitions_validate_ranges() {
     assert!(body.validate().is_err());
 }
 
-fn ramp() -> Contour {
-    Contour::new(0.0, vec![segment(Time::ONE, 1.0)]).unwrap()
+fn ramp() -> Envelope {
+    Envelope::new(0.0, vec![segment(Time::ONE, 1.0)]).unwrap()
 }
 fn segment(duration: Time, to: f64) -> Segment {
     Segment {

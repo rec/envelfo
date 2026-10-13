@@ -26,7 +26,7 @@ def clock_patch(
     }
     if action == 'start':
         children['held'] = {
-            'kind': 'contour',
+            'kind': 'envelope',
             'start': 'event',
             'initial': 0,
             'segments': [{'duration': '1/2 s', 'to': 1}],
@@ -285,7 +285,7 @@ def staged_patch(clock: str = 'seconds') -> envelfo.EnvelfoUse:
                             {
                                 'name': 'on',
                                 'envelfo': {
-                                    'kind': 'contour',
+                                    'kind': 'envelope',
                                     'segments': [{'duration': f'1/2 {unit}', 'to': 1}],
                                 },
                             },
@@ -310,7 +310,7 @@ def staged_patch(clock: str = 'seconds') -> envelfo.EnvelfoUse:
                             {
                                 'name': 'high',
                                 'envelfo': {
-                                    'kind': 'contour',
+                                    'kind': 'envelope',
                                     'initial': 1,
                                     'segments': [{'duration': f'1/10 {unit}', 'to': 1}],
                                 },

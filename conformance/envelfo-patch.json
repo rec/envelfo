@@ -44,13 +44,13 @@
       ]
     },
     {
-      "name": "natural-marker-starts-contour-with-exact-boundary",
+      "name": "natural-marker-starts-envelope-with-exact-boundary",
       "definition": {
         "body": {
           "kind": "patch",
           "envelfos": {
             "clock": {"kind": "lfo", "rate": "1", "markers": [{"name": "tick", "position": "1/4"}]},
-            "attack": {"kind": "contour", "start": "event", "segments": [{"duration": "1/2 s", "to": 1}]},
+            "attack": {"kind": "envelope", "start": "event", "segments": [{"duration": "1/2 s", "to": 1}]},
             "level": {"kind": "affine", "input": "attack", "scale": 0.5, "offset": 0.5}
           },
           "outputs": {"plain": "attack", "scaled": "level"},
@@ -73,7 +73,7 @@
           "envelfos": {
             "clock": {"kind": "lfo", "shape": "triangle", "rate": "1"},
             "edge": {"kind": "threshold", "input": "clock", "lower": -0.25, "upper": 0.25},
-            "attack": {"kind": "contour", "start": "event", "segments": [{"duration": "1/2 s", "to": 1}]}
+            "attack": {"kind": "envelope", "start": "event", "segments": [{"duration": "1/2 s", "to": 1}]}
           },
           "outputs": {"plain": "attack", "gate": "edge"},
           "event_outputs": {"rise": "edge.rising"},

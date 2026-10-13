@@ -24,8 +24,8 @@
 use std::collections::BTreeMap;
 
 use crate::Error;
-use crate::contour::{
-    Contour, ContourCommand, ContourState, Initial, Marker, Playback, Retrigger, Start,
+use crate::envelope::{
+    Envelope, EnvelopeCommand, EnvelopeState, Initial, Marker, Playback, Retrigger, Start,
     validate_markers,
 };
 use crate::lfo::{Command, Direction, Driver, LFO, LFOState};
@@ -58,7 +58,7 @@ impl ClockMapping for Seconds {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Node {
     LFO { body: LFO, markers: Vec<Marker> },
-    Contour(Contour),
+    Envelope(Envelope),
     Stages(Stages),
     SampleHold(SampleHold),
     Signal(Operator),
@@ -178,7 +178,7 @@ impl Patch {
             .map(|child| {
                 Ok(match &child.node {
                     Node::LFO { body, .. } => Some(ChildState::Lfo(body.initial(local)?)),
-                    Node::Contour(body) => Some(ChildState::Contour(body.initial(local)?)),
+                    Node::Envelope(body) => Some(ChildState::Envelope(body.initial(local)?)),
                     Node::Stages(body) => Some(ChildState::Stages(body.initial(local)?)),
                     Node::SampleHold(body) => Some(ChildState::Sample(body.initial(
                         local,
@@ -312,11 +312,11 @@ impl Patch {
                         ));
                     }
                 }
-                Node::Contour(body) => {
+                Node::Envelope(body) => {
                     body.validate()?;
                     if body.initial == Initial::Current {
                         return Err(Error::InvalidDefinition(
-                            "Patch Contour needs explicit initial level",
+                            "Patch Envelope needs explicit initial level",
                         ));
                     }
                 }
@@ -372,7 +372,7 @@ impl Patch {
             let child = &self.children[index];
             let range = match &child.node {
                 Node::Signal(operator) => operator.range(&ranges)?,
-                Node::Contour(c) if !c.bipolar => (0.0, 1.0),
+                Node::Envelope(c) if !c.bipolar => (0.0, 1.0),
                 _ => (-1.0, 1.0),
             };
             ranges.insert(child.name.clone(), range);
@@ -411,7 +411,7 @@ impl Patch {
             let valid = match (&connection.action, target) {
                 (ConnectionAction::Capture, Node::Signal(Operator::Latch(_)))
                 | (ConnectionAction::Sample, Node::SampleHold(_)) => true,
-                (ConnectionAction::Start, Node::Contour(c)) => {
+                (ConnectionAction::Start, Node::Envelope(c)) => {
                     c.start == Start::Event
                         && c.release.is_empty()
                         && c.playback == Playback::Once
@@ -452,7 +452,7 @@ impl Patch {
                 matches!(port.port.as_str(), "done" | "stage.done")
                     || s.stages.iter().any(|stage| {
                         let (markers, playback) = match &stage.body {
-                            Body::Contour(c) => (&c.markers, c.playback),
+                            Body::Envelope(c) => (&c.markers, c.playback),
                             _ => (&stage.markers, Playback::Once),
                         };
                         markers.iter().any(|m| m.name == port.port)
@@ -473,7 +473,7 @@ impl Patch {
     fn value(&self, index: usize, state: &ChildState, local: Time) -> Result<f64, Error> {
         let value = match (&self.children[index].node, state) {
             (Node::LFO { body, .. }, ChildState::Lfo(state)) => body.value(state, local)?,
-            (Node::Contour(body), ChildState::Contour(state)) => body.value(state, local)?,
+            (Node::Envelope(body), ChildState::Envelope(state)) => body.value(state, local)?,
             (Node::Stages(body), ChildState::Stages(state)) => body.value(state, local)?,
             (Node::SampleHold(body), ChildState::Sample(state)) => body.value(state, local)?,
             _ => {
@@ -551,11 +551,11 @@ impl Patch {
                 body.command(current, local, event.ordinal, *command)?;
                 vec![]
             }
-            (Node::Contour(body), ChildState::Contour(current), command) => {
+            (Node::Envelope(body), ChildState::Envelope(current), command) => {
                 let command = match command {
-                    ChildCommand::Start => ContourCommand::Start,
-                    ChildCommand::Playback(c) => ContourCommand::Playback(*c),
-                    _ => return Err(Error::Unsupported("unsupported Contour command")),
+                    ChildCommand::Start => EnvelopeCommand::Start,
+                    ChildCommand::Playback(c) => EnvelopeCommand::Playback(*c),
+                    _ => return Err(Error::Unsupported("unsupported Envelope command")),
                 };
                 body.command(current, local, event.ordinal, command)?;
                 vec![]
@@ -774,7 +774,7 @@ impl Patch {
 #[derive(Clone, Debug, PartialEq)]
 enum ChildState {
     Lfo(LFOState),
-    Contour(ContourState),
+    Envelope(EnvelopeState),
     Stages(StageState),
     Sample(SampleState),
 }
@@ -783,7 +783,7 @@ impl ChildState {
     fn next_ordinal(&self) -> Result<u64, Error> {
         let ordinal = match self {
             Self::Lfo(s) => s.ordinal,
-            Self::Contour(s) => s.ordinal,
+            Self::Envelope(s) => s.ordinal,
             Self::Stages(s) => s.ordinal,
             Self::Sample(s) => s.ordinal,
         };

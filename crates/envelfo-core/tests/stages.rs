@@ -1,4 +1,4 @@
-use envelfo_core::contour::{Contour, Initial, Marker, Playback, Segment};
+use envelfo_core::envelope::{Envelope, Initial, Marker, Playback, Segment};
 use envelfo_core::lfo::{Command, LFO, Shape};
 use envelfo_core::stages::{Action, Body, Event, Stage, StageCommand, Stages, Transition};
 use envelfo_core::time::Time;
@@ -101,9 +101,9 @@ fn finite_repeat_boundary_transition_wins_over_obsolete_completion_transition() 
 #[test]
 fn cue_reenters_with_current_level_and_preserves_pause() {
     let mut body = repeated(Playback::Once, false, None);
-    let mut contour = ramp();
-    contour.initial = Initial::Current;
-    body.stages.push(stage("release", Body::Contour(contour)));
+    let mut envelope = ramp();
+    envelope.initial = Initial::Current;
+    body.stages.push(stage("release", Body::Envelope(envelope)));
     body.transitions.push(transition(
         "sweep",
         "cue.release",
@@ -153,14 +153,14 @@ fn stage_lfo_fade_saturates_without_unnecessary_rational_overflow() {
 
 #[test]
 fn exact_marker_order_is_preserved_near_float_precision_limit() {
-    let mut contour = ramp();
-    contour.markers = vec![
+    let mut envelope = ramp();
+    envelope.markers = vec![
         marker("earlier", t(i64::MAX - 2, i64::MAX)),
         marker("later", t(i64::MAX - 1, i64::MAX)),
     ];
     let body = Stages {
         initial_stage: "sweep".into(),
-        stages: vec![stage("sweep", Body::Contour(contour))],
+        stages: vec![stage("sweep", Body::Envelope(envelope))],
         transitions: vec![],
     };
     let mut state = body.initial(Time::ZERO).unwrap();
@@ -195,7 +195,7 @@ fn capacity_overflow_and_invalid_commands_roll_back_the_whole_advance() {
     assert!(body.advance(&mut state, Time::ONE, Some(&invalid)).is_err());
     assert_eq!(state, saved);
     let mut body = repeated(Playback::Once, false, None);
-    if let Body::Contour(c) = &mut body.stages[0].body {
+    if let Body::Envelope(c) = &mut body.stages[0].body {
         c.segments[0].duration = t(1, 2);
     }
     let mut state = body.initial(Time::ZERO).unwrap();
@@ -256,7 +256,7 @@ fn stage_definitions_reject_unknown_transitions_and_reserved_markers() {
         .push(transition("sweep", "stage.unknown", Action::Finish));
     assert!(body.initial(Time::ZERO).is_err());
     body.transitions.clear();
-    if let Body::Contour(c) = &mut body.stages[0].body {
+    if let Body::Envelope(c) = &mut body.stages[0].body {
         c.markers[0].name = "done".into();
     }
     assert!(body.initial(Time::ZERO).is_err());
@@ -296,16 +296,16 @@ fn ports(events: &[envelfo_core::stages::OutputEvent]) -> Vec<&str> {
     events.iter().map(|e| e.port.as_str()).collect()
 }
 fn repeated(playback: Playback, named: bool, repeat_count: Option<u64>) -> Stages {
-    let mut contour = ramp();
-    contour.playback = playback;
-    contour.repeat_count = repeat_count;
-    contour.markers = vec![marker("lower", t(1, 4)), marker("upper", t(3, 4))];
+    let mut envelope = ramp();
+    envelope.playback = playback;
+    envelope.repeat_count = repeat_count;
+    envelope.markers = vec![marker("lower", t(1, 4)), marker("upper", t(3, 4))];
     if named {
-        contour.loop_bounds = Some((t(1, 4), t(3, 4)));
+        envelope.loop_bounds = Some((t(1, 4), t(3, 4)));
     }
     Stages {
         initial_stage: "sweep".into(),
-        stages: vec![stage("sweep", Body::Contour(contour))],
+        stages: vec![stage("sweep", Body::Envelope(envelope))],
         transitions: vec![],
     }
 }
@@ -323,8 +323,8 @@ fn transition(source: &str, event: &str, action: Action) -> Transition {
         action,
     }
 }
-fn ramp() -> Contour {
-    Contour::new(
+fn ramp() -> Envelope {
+    Envelope::new(
         0.0,
         vec![Segment {
             duration: Time::ONE,

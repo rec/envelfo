@@ -5,7 +5,7 @@ composition and events. Extraction from uFor and enge is in progress.
 
 uFor owns the portable definitions. enveLFO owns their execution. The Python
 library requires neither NumPy nor an audio engine. The Rust core now
-supports exact LFO, Contour, Stages and Patch execution, including signal
+supports exact LFO, Envelope, Stages and Patch execution, including signal
 operators, connection scheduling and portable random streams. Consumer adapter
 integration is still in progress.
 
@@ -14,6 +14,11 @@ type `LFOState`. This replaces `Cycle` without compatibility aliases. Rust uses
 `envelfo_core::lfo`. The `cycle` event port still names a completed loop traversal;
 it is not a body type. Oscillator duty cycles and graph dependency cycles also
 keep their existing meaning.
+
+The envelope-like Envelfo body is `ufor.envelfo.Envelope`, with `kind = "envelope"`
+and state type `EnvelopeState`. It replaces `Contour` without aliases. Rust uses
+`envelfo_core::envelope`. uFor's lower-level `ufor.envelope.Envelope` remains a
+distinct renderer envelope; this rename does not merge the two models.
 
 ## Python
 
@@ -35,7 +40,7 @@ assert value.value == 1.0
 
 Execution functions live in `envelfo.runtime`; authored definitions, typed
 commands, values, and snapshot records remain in `ufor.envelfo`. Use
-`envelfo_event` for timestamped LFO/Contour/SampleHold commands and
+`envelfo_event` for timestamped LFO/Envelope/SampleHold commands and
 `advance_envelfo` for Stages, retaining its returned state and ordered events.
 `next_stage_event` exposes the next natural staged boundary. Snapshot records
 support Pydantic JSON serialization and restoration without native bindings.
@@ -139,7 +144,7 @@ Conversions to and from arpeg's `num_rational::Ratio<i64>` are provided; incomin
 ratios are checked before normalization. Signal observations use floating point.
 The runtime dependency disables num-rational's default BigInt feature.
 
-`Contour::new(initial, segments)` supplies ordinary attack defaults. Segment
+`Envelope::new(initial, segments)` supplies ordinary attack defaults. Segment
 durations are exact times in the host's chosen seconds or beat clock; target
 levels and curve shapes are floating point. The host resolves named loop bounds
 to marker positions. Release starts at the captured current level, and retrigger,
@@ -154,7 +159,7 @@ it does not run transitions. `Stages::next_event` inspects the next boundary
 without advancing. Commands at a boundary preempt obsolete natural completion;
 markers precede loop boundaries, and finite repeats emit the boundary then
 `stage.done`. A finish transition emits `done`. LFO markers are stored on their
-Stage; Contour markers are part of the Contour definition. Contour/Stage states
+Stage; Envelope markers are part of the Envelope definition. Envelope/Stage states
 can be cloned for continuation, and failed advances leave the supplied state
 unchanged. One advance is limited to 4096 emitted events, with an explicit
 capacity error rather than dropped events. Public Rust definition fields are
@@ -165,7 +170,7 @@ again after changing a definition.
 dependencies, event ports, output names, action targets and finite signal ranges.
 Child, connection and event-output vectors preserve declaration order. Signal
 ordering matches Python's first-encountered dependency order. Nodes include
-LFOs with markers, Contours, Stages, SampleHold, and Sum/Product/Affine/Quantize/
+LFOs with markers, Envelopes, Stages, SampleHold, and Sum/Product/Affine/Quantize/
 Latch/Threshold/Slew operators. Signals remain dimensionless and are not clipped.
 
 `Patch::advance(state, at, next_delivery, clock)` processes exact natural events

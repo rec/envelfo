@@ -6,12 +6,12 @@ from ufor.codec import parse_score, score_toml
 from ufor.envelfo import (
     LFO,
     Affine,
-    Contour,
     EnterStage,
     EnvelfoEvent,
     EnvelfoScore,
     EnvelfoState,
     EnvelfoUse,
+    Envelope,
     FinishStage,
     Hold,
     Marker,
@@ -31,9 +31,9 @@ from ufor.segments import Segment
 
 from envelfo.runtime import (
     advance_envelfo,
-    contour_envelope,
     envelfo_at,
     envelfo_event,
+    envelope_envelope,
     initial_envelfo,
     next_stage_event,
     transform_value,
@@ -48,7 +48,7 @@ def staged_envelfo() -> EnvelfoUse:
                 Stage(name='waiting', envelfo=Hold(value=0.0)),
                 Stage(
                     name='attack',
-                    envelfo=Contour(
+                    envelfo=Envelope(
                         initial='current',
                         segments=[Segment(duration=Fraction(1, 4), to=0.7)],
                     ),
@@ -64,7 +64,7 @@ def staged_envelfo() -> EnvelfoUse:
                 ),
                 Stage(
                     name='release',
-                    envelfo=Contour(
+                    envelfo=Envelope(
                         initial='current',
                         segments=[Segment(duration=Fraction(1, 4), to=0.0)],
                     ),
@@ -101,7 +101,7 @@ def staged_envelfo() -> EnvelfoUse:
     )
 
 
-@pytest.mark.parametrize('kind', ['hold', 'lfo', 'contour'])
+@pytest.mark.parametrize('kind', ['hold', 'lfo', 'envelope'])
 def test_next_stage_boundary_query_is_exact_and_does_not_advance_state(
     kind: str,
 ) -> None:
@@ -110,7 +110,7 @@ def test_next_stage_boundary_query_is_exact_and_does_not_advance_state(
         if kind == 'hold'
         else LFO(rate=2, markers=[Marker(name='pulse', position=Fraction(1, 2))])
         if kind == 'lfo'
-        else Contour(segments=[Segment(duration=Fraction(1, 4), to=1)])
+        else Envelope(segments=[Segment(duration=Fraction(1, 4), to=1)])
     )
     body = Stages(initial_stage='source', stages=[Stage(name='source', envelfo=child)])
     envelfo = EnvelfoUse(body=body)
@@ -228,7 +228,7 @@ def test_patch_transforms_follow_dependencies_without_clipping() -> None:
             'combined': Sum(inputs=['shaped', 'carrier']),
             'shaped': Product(inputs=['carrier', 'envelope']),
             'carrier': LFO(rate=1),
-            'envelope': Contour(segments=[Segment(duration=1, to=1)]),
+            'envelope': Envelope(segments=[Segment(duration=1, to=1)]),
         },
         outputs={'signal': 'output'},
     )
@@ -242,7 +242,7 @@ def test_patch_transforms_follow_dependencies_without_clipping() -> None:
     assert Patch.model_validate_json(patch.model_dump_json()) == patch
 
 
-def test_patch_marker_can_start_waiting_contour() -> None:
+def test_patch_marker_can_start_waiting_envelope() -> None:
     body = {
         'kind': 'patch',
         'envelfos': {
@@ -252,7 +252,7 @@ def test_patch_marker_can_start_waiting_contour() -> None:
                 'markers': [{'name': 'peak', 'position': '1/4'}],
             },
             'accent': {
-                'kind': 'contour',
+                'kind': 'envelope',
                 'start': 'event',
                 'segments': [{'duration': '1/4 s', 'to': 1}],
             },
@@ -264,15 +264,15 @@ def test_patch_marker_can_start_waiting_contour() -> None:
         {'name': 'accent', 'title': 'Accent', 'body': body}
     )
     assert parse_score(score_toml(score)) == score
-    contour = EnvelfoUse(body=score.body.envelfos['accent'])
-    state = initial_envelfo(contour, Fraction(0))
-    assert envelfo_at(contour, state, Fraction(1)).value == 0
+    envelope = EnvelfoUse(body=score.body.envelfos['accent'])
+    state = initial_envelfo(envelope, Fraction(0))
+    assert envelfo_at(envelope, state, Fraction(1)).value == 0
     state = envelfo_event(
-        contour,
+        envelope,
         state,
         EnvelfoEvent(at=Fraction(1, 8), ordinal=0, action='start'),
     )
-    assert envelfo_at(contour, state, Fraction(1, 4)).value == 0.5
+    assert envelfo_at(envelope, state, Fraction(1, 4)).value == 0.5
     body['events'][0]['every'] = 3
     body['events'][0]['offset'] = 2
     body['events'][0]['probability'] = 0.5
@@ -302,13 +302,13 @@ def test_patch_marker_can_start_waiting_contour() -> None:
         EnvelfoScore.model_validate({'name': 'accent', 'title': 'Accent', 'body': body})
     body['events'][0]['source'] = 'clock.peak'
     body['envelfos']['accent']['start'] = 'activation'
-    with pytest.raises(ValidationError, match='event-start Contour'):
+    with pytest.raises(ValidationError, match='event-start Envelope'):
         EnvelfoScore.model_validate({'name': 'accent', 'title': 'Accent', 'body': body})
     body['envelfos']['accent']['start'] = 'event'
     body['envelfos']['accent']['retrigger'] = 'reset'
-    with pytest.raises(ValidationError, match='event-start Contour'):
+    with pytest.raises(ValidationError, match='event-start Envelope'):
         EnvelfoScore.model_validate({'name': 'accent', 'title': 'Accent', 'body': body})
-    with pytest.raises(ValidationError, match='stage contours start on stage entry'):
+    with pytest.raises(ValidationError, match='stage envelopes start on stage entry'):
         Stages.model_validate(
             {
                 'initial_stage': 'accent',
@@ -316,7 +316,7 @@ def test_patch_marker_can_start_waiting_contour() -> None:
                     {
                         'name': 'accent',
                         'envelfo': {
-                            'kind': 'contour',
+                            'kind': 'envelope',
                             'start': 'event',
                             'segments': [{'duration': '1 s', 'to': 1}],
                         },
@@ -326,8 +326,8 @@ def test_patch_marker_can_start_waiting_contour() -> None:
         )
 
 
-def test_autonomous_contour_completes_without_note_off() -> None:
-    envelfo = EnvelfoUse(body=Contour(segments=[Segment(duration=Fraction(1), to=1)]))
+def test_autonomous_envelope_completes_without_note_off() -> None:
+    envelfo = EnvelfoUse(body=Envelope(segments=[Segment(duration=Fraction(1), to=1)]))
     state = initial_envelfo(envelfo, Fraction(2))
     assert envelfo_at(envelfo, state, Fraction(2)).status == 'running'
     assert envelfo_at(envelfo, state, Fraction(5, 2)).value == 0.5
@@ -344,9 +344,9 @@ def test_autonomous_contour_completes_without_note_off() -> None:
     )
 
 
-def test_triggered_contour_holds_then_releases_from_current_value() -> None:
+def test_triggered_envelope_holds_then_releases_from_current_value() -> None:
     envelfo = EnvelfoUse(
-        body=Contour(
+        body=Envelope(
             segments=[Segment(duration=Fraction(1), to=1)],
             release=[Segment(duration=Fraction(1), to=0)],
         )
@@ -413,7 +413,7 @@ def test_lfo_pause_reverse_and_seek_preserve_seconds_position() -> None:
     )
 
 
-def test_relative_shift_wraps_lfos_and_clamps_contours() -> None:
+def test_relative_shift_wraps_lfos_and_clamps_envelopes() -> None:
     lfo = EnvelfoUse(body=LFO(rate=Fraction(1)))
     lfo_state = envelfo_event(
         lfo,
@@ -427,10 +427,10 @@ def test_relative_shift_wraps_lfos_and_clamps_contours() -> None:
     )
     assert envelfo_at(lfo, lfo_state, Fraction(1, 4)).value == pytest.approx(-1)
 
-    contour = EnvelfoUse(body=Contour(segments=[Segment(duration=Fraction(1), to=1)]))
+    envelope = EnvelfoUse(body=Envelope(segments=[Segment(duration=Fraction(1), to=1)]))
     state = envelfo_event(
-        contour,
-        initial_envelfo(contour, Fraction(0)),
+        envelope,
+        initial_envelfo(envelope, Fraction(0)),
         EnvelfoEvent(
             at=Fraction(1, 2),
             ordinal=0,
@@ -438,9 +438,9 @@ def test_relative_shift_wraps_lfos_and_clamps_contours() -> None:
             offset=Fraction(3, 4),
         ),
     )
-    assert envelfo_at(contour, state, Fraction(1, 2)).value == 1
+    assert envelfo_at(envelope, state, Fraction(1, 2)).value == 1
     state = envelfo_event(
-        contour,
+        envelope,
         state,
         EnvelfoEvent(
             at=Fraction(1, 2),
@@ -449,7 +449,7 @@ def test_relative_shift_wraps_lfos_and_clamps_contours() -> None:
             offset=Fraction(-1, 2),
         ),
     )
-    assert envelfo_at(contour, state, Fraction(1, 2)).value == pytest.approx(0.5)
+    assert envelfo_at(envelope, state, Fraction(1, 2)).value == pytest.approx(0.5)
 
 
 @pytest.mark.parametrize(
@@ -459,11 +459,11 @@ def test_relative_shift_wraps_lfos_and_clamps_contours() -> None:
         (PlaybackMode.ping_pong, 1, 0.75),
     ],
 )
-def test_contour_playback_loops_and_releases_from_current_value(
+def test_envelope_playback_loops_and_releases_from_current_value(
     mode: PlaybackMode, at_end: float, after_end: float
 ) -> None:
     envelfo = EnvelfoUse(
-        body=Contour(
+        body=Envelope(
             segments=[Segment(duration=Fraction(1), to=1)],
             release=[Segment(duration=Fraction(1), to=0)],
             playback=mode,
@@ -492,12 +492,12 @@ def test_contour_playback_loops_and_releases_from_current_value(
         envelfo, state, Fraction(7, 4)
     )
     with pytest.raises(ValueError, match='cannot be converted'):
-        contour_envelope(envelfo)
+        envelope_envelope(envelfo)
 
 
-def test_looping_contour_shift_keeps_unwrapped_position() -> None:
+def test_looping_envelope_shift_keeps_unwrapped_position() -> None:
     envelfo = EnvelfoUse(
-        body=Contour(
+        body=Envelope(
             segments=[Segment(duration=Fraction(1), to=1)],
             playback=PlaybackMode.ping_pong,
         )
@@ -542,7 +542,7 @@ def test_looping_contour_shift_keeps_unwrapped_position() -> None:
         ),
     ],
 )
-def test_staged_contour_playback_orders_markers_and_boundaries(
+def test_staged_envelope_playback_orders_markers_and_boundaries(
     mode: PlaybackMode, ports: list[tuple[Fraction, str]]
 ) -> None:
     envelfo = EnvelfoUse(
@@ -551,7 +551,7 @@ def test_staged_contour_playback_orders_markers_and_boundaries(
             stages=[
                 Stage(
                     name='sweep',
-                    envelfo=Contour(
+                    envelfo=Envelope(
                         segments=[Segment(duration=Fraction(1), to=1)],
                         playback=mode,
                         markers=[Marker(name='quarter', position=Fraction(1, 4))],
@@ -582,14 +582,14 @@ def test_staged_loop_releases_immediately_from_current_value(
             stages=[
                 Stage(
                     name='sweep',
-                    envelfo=Contour(
+                    envelfo=Envelope(
                         segments=[Segment(duration=Fraction(1), to=1)],
                         playback=mode,
                     ),
                 ),
                 Stage(
                     name='release',
-                    envelfo=Contour(
+                    envelfo=Envelope(
                         initial='current',
                         segments=[Segment(duration=Fraction(1), to=0)],
                     ),
@@ -624,7 +624,7 @@ def test_staged_loop_cycle_port_can_enter_another_stage() -> None:
             stages=[
                 Stage(
                     name='sweep',
-                    envelfo=Contour(
+                    envelfo=Envelope(
                         segments=[Segment(duration=Fraction(1), to=1)],
                         playback=PlaybackMode.loop,
                     ),
@@ -680,12 +680,12 @@ def test_staged_loop_cycle_port_can_enter_another_stage() -> None:
         ),
     ],
 )
-def test_named_contour_loop_boundaries_preserve_markers_and_events(
+def test_named_envelope_loop_boundaries_preserve_markers_and_events(
     mode: PlaybackMode,
     boundary_events: list[tuple[Fraction, str]],
     value: float,
 ) -> None:
-    contour = Contour(
+    envelope = Envelope(
         segments=[Segment(duration=Fraction(1), to=1)],
         playback=mode,
         markers=[
@@ -698,7 +698,7 @@ def test_named_contour_loop_boundaries_preserve_markers_and_events(
     envelfo = EnvelfoUse(
         body=Stages(
             initial_stage='sweep',
-            stages=[Stage(name='sweep', envelfo=contour)],
+            stages=[Stage(name='sweep', envelfo=envelope)],
         )
     )
     result = advance_envelfo(
@@ -706,7 +706,7 @@ def test_named_contour_loop_boundaries_preserve_markers_and_events(
     )
     assert [(e.at, e.port) for e in result.events] == boundary_events
     assert result.value.value == value
-    standalone = EnvelfoUse(body=contour)
+    standalone = EnvelfoUse(body=envelope)
     started = envelfo_event(
         standalone,
         initial_envelfo(standalone, Fraction(0)),
@@ -722,7 +722,7 @@ def test_named_loop_reverse_orders_boundary_markers_before_cycle() -> None:
             stages=[
                 Stage(
                     name='sweep',
-                    envelfo=Contour(
+                    envelfo=Envelope(
                         segments=[Segment(duration=Fraction(1), to=1)],
                         playback=PlaybackMode.loop,
                         markers=[
@@ -767,10 +767,10 @@ def test_named_loop_reverse_orders_boundary_markers_before_cycle() -> None:
         ),
     ],
 )
-def test_finite_contour_repeats_hold_final_boundary(
+def test_finite_envelope_repeats_hold_final_boundary(
     mode: PlaybackMode, events: list[str], value: float
 ) -> None:
-    contour = Contour(
+    envelope = Envelope(
         segments=[Segment(duration=Fraction(1), to=1)],
         playback=mode,
         repeat_count=2,
@@ -778,7 +778,7 @@ def test_finite_contour_repeats_hold_final_boundary(
     staged = EnvelfoUse(
         body=Stages(
             initial_stage='sweep',
-            stages=[Stage(name='sweep', envelfo=contour)],
+            stages=[Stage(name='sweep', envelfo=envelope)],
         )
     )
     result = advance_envelfo(staged, initial_envelfo(staged, Fraction(0)), Fraction(3))
@@ -790,7 +790,7 @@ def test_finite_contour_repeats_hold_final_boundary(
         EnvelfoState.model_validate_json(result.state.model_dump_json()) == result.state
     )
 
-    standalone = EnvelfoUse(body=contour)
+    standalone = EnvelfoUse(body=envelope)
     initial = initial_envelfo(standalone, Fraction(0))
     assert envelfo_at(standalone, initial, Fraction(3)).value == value
     assert envelfo_at(standalone, initial, Fraction(3)).status == 'complete'
@@ -803,7 +803,7 @@ def test_finite_contour_repeats_hold_final_boundary(
 
 
 def test_finite_named_loop_counts_reverse_boundary_crossing() -> None:
-    contour = Contour(
+    envelope = Envelope(
         segments=[Segment(duration=Fraction(1), to=1)],
         playback=PlaybackMode.loop,
         markers=[
@@ -817,7 +817,7 @@ def test_finite_named_loop_counts_reverse_boundary_crossing() -> None:
     staged = EnvelfoUse(
         body=Stages(
             initial_stage='sweep',
-            stages=[Stage(name='sweep', envelfo=contour)],
+            stages=[Stage(name='sweep', envelfo=envelope)],
         )
     )
     forward = advance_envelfo(staged, initial_envelfo(staged, Fraction(0)), Fraction(1))
@@ -845,7 +845,7 @@ def test_final_repeat_emits_done_before_entering_next_stage() -> None:
             stages=[
                 Stage(
                     name='sweep',
-                    envelfo=Contour(
+                    envelfo=Envelope(
                         segments=[Segment(duration=Fraction(1), to=1)],
                         playback=PlaybackMode.loop,
                         repeat_count=1,
@@ -872,9 +872,9 @@ def test_final_repeat_emits_done_before_entering_next_stage() -> None:
     assert result.value.value == 0.5
 
 
-def test_contour_reverses_through_segments_without_recapturing_start() -> None:
+def test_envelope_reverses_through_segments_without_recapturing_start() -> None:
     envelfo = EnvelfoUse(
-        body=Contour(
+        body=Envelope(
             segments=[Segment(duration=Fraction(1), to=1)],
             release=[Segment(duration=Fraction(1), to=0)],
         )
@@ -934,7 +934,7 @@ def test_unconnected_stage_completion_emits_once() -> None:
             stages=[
                 Stage(
                     name='rise',
-                    envelfo=Contour(segments=[Segment(duration=Fraction(1, 4), to=1)]),
+                    envelfo=Envelope(segments=[Segment(duration=Fraction(1, 4), to=1)]),
                 )
             ],
         )

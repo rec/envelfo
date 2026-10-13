@@ -73,14 +73,14 @@ def lfo_definition(definition: envelfo.EnvelfoUse) -> lfo.LFO:
     )
 
 
-def contour_envelope(definition: envelfo.EnvelfoUse) -> envelope.Envelope:
+def envelope_envelope(definition: envelfo.EnvelfoUse) -> envelope.Envelope:
     body = definition.body
-    if not isinstance(body, envelfo.Contour):
-        raise ValueError('envelfo is not a contour')
+    if not isinstance(body, envelfo.Envelope):
+        raise ValueError('envelfo is not a envelope')
     if body.playback != envelfo.PlaybackMode.once:
-        raise ValueError('looping contours cannot be converted to envelopes')
+        raise ValueError('looping envelopes cannot be converted to envelopes')
     if body.initial == 'current':
-        raise ValueError('contour current value needs stage entry')
+        raise ValueError('envelope current value needs stage entry')
     return envelope.Envelope(
         clock=definition.clock,
         scope=definition.scope,
@@ -123,7 +123,9 @@ def initial_envelfo(
             s for s in definition.body.stages if s.name == definition.body.initial_stage
         )
         initial = (
-            stage.envelfo.initial if isinstance(stage.envelfo, envelfo.Contour) else 0.0
+            stage.envelfo.initial
+            if isinstance(stage.envelfo, envelfo.Envelope)
+            else 0.0
         )
         assert isinstance(initial, float)
         return envelfo.EnvelfoState(
@@ -134,11 +136,11 @@ def initial_envelfo(
                 position=_initial_position(stage.envelfo, at),
             )
         )
-    if not isinstance(definition.body, envelfo.Contour):
+    if not isinstance(definition.body, envelfo.Envelope):
         raise ValueError('envelfo reference must be materialized before use')
     assert isinstance(definition.body.initial, float)
     return envelfo.EnvelfoState(
-        runtime=envelfo.ContourState(
+        runtime=envelfo.EnvelopeState(
             at=at,
             phase=(
                 'idle'
@@ -210,10 +212,10 @@ def envelfo_at(
         state.runtime, envelfo.StageState
     ):
         return advance_envelfo(definition, state, at).value
-    if isinstance(definition.body, envelfo.Contour) and isinstance(
-        state.runtime, envelfo.ContourState
+    if isinstance(definition.body, envelfo.Envelope) and isinstance(
+        state.runtime, envelfo.EnvelopeState
     ):
-        return _contour_value(definition.body, state.runtime, at)
+        return _envelope_value(definition.body, state.runtime, at)
     raise ValueError('envelfo state does not match its definition')
 
 
@@ -290,11 +292,11 @@ def envelfo_event(
                 at=event.at, ordinal=event.ordinal, position=position
             )
         )
-    if isinstance(definition.body, envelfo.Contour) and isinstance(
-        state.runtime, envelfo.ContourState
+    if isinstance(definition.body, envelfo.Envelope) and isinstance(
+        state.runtime, envelfo.EnvelopeState
     ):
         if event.action in ('cue', 'reset', 'transport', 'rate', 'sample'):
-            raise ValueError('contours do not accept this event')
+            raise ValueError('envelopes do not accept this event')
         control.check_order(state.runtime.at, state.runtime.ordinal, event)
         runtime = state.runtime
         position = _position_at(runtime.position, event.at)
@@ -319,7 +321,7 @@ def envelfo_event(
                 complete_coordinate = _repeat_boundary_coordinate(
                     definition.body, boundary, runtime.position.direction
                 )
-        observed = _contour_value(definition.body, runtime, event.at)
+        observed = _envelope_value(definition.body, runtime, event.at)
         if event.action == 'start' or (
             event.action == 'note_on' and definition.body.start == 'activation'
         ):
@@ -338,7 +340,7 @@ def envelfo_event(
                     update={
                         'coordinate': Fraction(0),
                         'age': Fraction(0),
-                        'rate': _contour_rate(definition.body.segments),
+                        'rate': _envelope_rate(definition.body.segments),
                     }
                 )
         elif event.action == 'note_off':
@@ -353,7 +355,7 @@ def envelfo_event(
                     update={
                         'coordinate': Fraction(0),
                         'age': Fraction(0),
-                        'rate': _contour_rate(definition.body.release),
+                        'rate': _envelope_rate(definition.body.release),
                     }
                 )
         else:
@@ -370,7 +372,7 @@ def envelfo_event(
                     }
                 )
         return envelfo.EnvelfoState(
-            runtime=envelfo.ContourState(
+            runtime=envelfo.EnvelopeState(
                 at=event.at,
                 ordinal=event.ordinal,
                 phase=phase,
@@ -410,7 +412,7 @@ def advance_envelfo(
             position = _position_command(_position_at(current.position, at), event)
             if (
                 event.action == 'shift'
-                and isinstance(stage, envelfo.Contour)
+                and isinstance(stage, envelfo.Envelope)
                 and stage.playback == envelfo.PlaybackMode.once
             ):
                 position = position.model_copy(
@@ -465,7 +467,7 @@ def next_stage_event(
         return None
     start = position.coordinate
     forward = position.direction == 1
-    if isinstance(stage, envelfo.Contour):
+    if isinstance(stage, envelfo.Envelope):
         if stage.playback == envelfo.PlaybackMode.once:
             for index, marker in enumerate(stage.markers):
                 target = marker.position
@@ -577,20 +579,20 @@ def next_stage_event(
     )
 
 
-def _contour_rate(segments: list[segments.Segment]) -> Fraction:
+def _envelope_rate(segments: list[segments.Segment]) -> Fraction:
     duration = sum((s.duration for s in segments), Fraction(0))
     return Fraction(1, 1) / duration if duration else Fraction(0)
 
 
-def _loop_bounds(body: envelfo.Contour) -> tuple[Fraction, Fraction]:
+def _loop_bounds(body: envelfo.Envelope) -> tuple[Fraction, Fraction]:
     if body.loop_start is None or body.loop_end is None:
         return Fraction(0), Fraction(1)
     positions = {m.name: m.position for m in body.markers}
     return positions[body.loop_start], positions[body.loop_end]
 
 
-def _contour_coordinate(
-    coordinate: Fraction, body: envelfo.Contour, release: bool = False
+def _envelope_coordinate(
+    coordinate: Fraction, body: envelfo.Envelope, release: bool = False
 ) -> Fraction:
     mode = envelfo.PlaybackMode.once if release else body.playback
     start, end = _loop_bounds(body)
@@ -612,7 +614,7 @@ def _contour_coordinate(
 
 
 def _repeat_crossings(
-    body: envelfo.Contour,
+    body: envelfo.Envelope,
     position: envelfo.EnvelfoPosition,
     at: Fraction,
     remaining: int,
@@ -647,23 +649,23 @@ def _repeat_crossings(
 
 
 def _repeat_boundary_coordinate(
-    body: envelfo.Contour, boundary: Fraction, direction: int
+    body: envelfo.Envelope, boundary: Fraction, direction: int
 ) -> Fraction:
     if body.playback == envelfo.PlaybackMode.loop:
         start, end = _loop_bounds(body)
         return end if direction == 1 else start
-    return _contour_coordinate(boundary, body)
+    return _envelope_coordinate(boundary, body)
 
 
 def _initial_position(
-    body: envelfo.Hold | envelfo.LFO | envelfo.Contour, at: Fraction
+    body: envelfo.Hold | envelfo.LFO | envelfo.Envelope, at: Fraction
 ) -> envelfo.EnvelfoPosition:
     if isinstance(body, envelfo.LFO):
         assert isinstance(body.rate, Fraction)
         return envelfo.EnvelfoPosition(at=at, coordinate=body.phase, rate=body.rate)
-    if isinstance(body, envelfo.Contour):
+    if isinstance(body, envelfo.Envelope):
         return envelfo.EnvelfoPosition(
-            at=at, coordinate=Fraction(0), rate=_contour_rate(body.segments)
+            at=at, coordinate=Fraction(0), rate=_envelope_rate(body.segments)
         )
     return envelfo.EnvelfoPosition(at=at, coordinate=Fraction(0), rate=Fraction(0))
 
@@ -715,8 +717,8 @@ def _position_command(
     return position
 
 
-def _contour_value(
-    body: envelfo.Contour, state: envelfo.ContourState, at: Fraction
+def _envelope_value(
+    body: envelfo.Envelope, state: envelfo.EnvelopeState, at: Fraction
 ) -> envelfo.EnvelfoValue:
     if state.phase == 'idle':
         assert isinstance(body.initial, float)
@@ -739,7 +741,7 @@ def _contour_value(
     coordinate = (
         complete_coordinate
         if complete_coordinate is not None
-        else _contour_coordinate(
+        else _envelope_coordinate(
             _coordinate_at(state.position, at), body, state.phase != 'on'
         )
         if duration
@@ -778,20 +780,20 @@ def _advance_stages(
                 'position': _position_at(state.position, time),
             }
         )
-        contour = next(s.envelfo for s in body.stages if s.name == stage)
+        envelope = next(s.envelfo for s in body.stages if s.name == stage)
         if (
-            isinstance(contour, envelfo.Contour)
-            and contour.repeat_count is not None
+            isinstance(envelope, envelfo.Envelope)
+            and envelope.repeat_count is not None
             and port
-            == ('cycle' if contour.playback == envelfo.PlaybackMode.loop else 'turned')
+            == ('cycle' if envelope.playback == envelfo.PlaybackMode.loop else 'turned')
         ):
             state = state.model_copy(update={'traversals': state.traversals + 1})
         final_repeat = (
-            isinstance(contour, envelfo.Contour)
-            and contour.repeat_count is not None
-            and state.traversals == contour.repeat_count
+            isinstance(envelope, envelfo.Envelope)
+            and envelope.repeat_count is not None
+            and state.traversals == envelope.repeat_count
             and port
-            == ('cycle' if contour.playback == envelfo.PlaybackMode.loop else 'turned')
+            == ('cycle' if envelope.playback == envelfo.PlaybackMode.loop else 'turned')
         )
         emitted.append(
             envelfo.EnvelfoOutputEvent(
@@ -802,10 +804,10 @@ def _advance_stages(
             )
         )
         if final_repeat:
-            assert isinstance(contour, envelfo.Contour)
-            start, end = _loop_bounds(contour)
+            assert isinstance(envelope, envelfo.Envelope)
+            start, end = _loop_bounds(envelope)
             if (
-                contour.playback == envelfo.PlaybackMode.ping_pong
+                envelope.playback == envelfo.PlaybackMode.ping_pong
                 and (state.position.coordinate - end) / (end - start) % 2 == 1
             ):
                 emitted.append(
@@ -843,7 +845,7 @@ def _advance_stages(
 
 
 def _named_loop_candidates(
-    stage: envelfo.Contour, state: envelfo.StageState
+    stage: envelfo.Envelope, state: envelfo.StageState
 ) -> list[tuple[Fraction, int, str]]:
     start, end = _loop_bounds(stage)
     width = end - start
@@ -944,9 +946,9 @@ def _stage_transition(
         )
         entry = (
             value
-            if isinstance(target, envelfo.Contour) and target.initial == 'current'
+            if isinstance(target, envelfo.Envelope) and target.initial == 'current'
             else target.initial
-            if isinstance(target, envelfo.Contour)
+            if isinstance(target, envelfo.Envelope)
             else value
         )
         assert isinstance(entry, float)
@@ -1004,7 +1006,7 @@ def _stage_value(
         return envelfo.EnvelfoValue(value=value, weight=1, status='running')
     curve = envelope.Curve(initial=state.entry_value, segments=stage.segments)
     duration = sum((s.duration for s in stage.segments), Fraction(0))
-    bounded = _contour_coordinate(coordinate, stage)
+    bounded = _envelope_coordinate(coordinate, stage)
     complete = stage.repeat_count is not None and state.traversals >= stage.repeat_count
     if complete:
         bounded = _repeat_boundary_coordinate(stage, coordinate, position.direction)

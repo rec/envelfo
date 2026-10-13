@@ -1,5 +1,5 @@
 use envelfo_core::Status;
-use envelfo_core::contour::{Contour, ContourCommand, Initial, Marker, Playback, Segment};
+use envelfo_core::envelope::{Envelope, EnvelopeCommand, Initial, Marker, Playback, Segment};
 use envelfo_core::lfo::{Clock, Command, Driver, LFO, Reset, Shape};
 use envelfo_core::random::random_word;
 use envelfo_core::stages::{Action, Body, Event, Stage, StageCommand, Stages, Transition};
@@ -67,13 +67,13 @@ fn patch_orchestration_matches_shared_observation_and_delivery_traces() {
 }
 
 #[test]
-fn contours_and_stages_match_every_shared_trace() {
+fn envelopes_and_stages_match_every_shared_trace() {
     for case in corpus()["cases"].as_array().unwrap() {
         let body = &case["definition"]["body"];
         match body["kind"].as_str().unwrap() {
-            "contour" => {
-                let contour = contour(body);
-                let mut state = contour.initial(Time::ZERO).unwrap();
+            "envelope" => {
+                let envelope = envelope(body);
+                let mut state = envelope.initial(Time::ZERO).unwrap();
                 for step in case["steps"].as_array().unwrap() {
                     let at = rational(&step["at"]);
                     if step["restore"] == true {
@@ -82,20 +82,20 @@ fn contours_and_stages_match_every_shared_trace() {
                     if !step["event"].is_null() {
                         let event = &step["event"];
                         assert_eq!(at, rational(&event["at"]));
-                        contour
+                        envelope
                             .command(
                                 &mut state,
                                 at,
                                 event["ordinal"].as_u64().unwrap(),
-                                ContourCommand::Playback(command(event)),
+                                EnvelopeCommand::Playback(command(event)),
                             )
                             .unwrap();
                     }
-                    check_value(contour.value(&state, at).unwrap(), step);
+                    check_value(envelope.value(&state, at).unwrap(), step);
                     assert!(step["events"].is_null());
                     if !step["runtime"].is_null() {
                         assert_eq!(step["runtime"], serde_json::json!({"phase": "release"}));
-                        assert_eq!(state.phase(), envelfo_core::contour::Phase::Release);
+                        assert_eq!(state.phase(), envelfo_core::envelope::Phase::Release);
                     }
                 }
             }
@@ -347,7 +347,7 @@ fn markers(body: &Value) -> Vec<Marker> {
         .unwrap_or_default()
 }
 
-fn contour(body: &Value) -> Contour {
+fn envelope(body: &Value) -> Envelope {
     // This decoder accepts only the corpus's canonical seconds serialization.
     // Authored quantities are normalized by the Python/Pint host, never by the core.
     let segments = |key: &str| {
@@ -370,18 +370,18 @@ fn contour(body: &Value) -> Contour {
             })
             .unwrap_or_default()
     };
-    let mut contour = Contour::new(0.0, segments("segments")).unwrap();
-    contour.initial = if body["initial"] == "current" {
+    let mut envelope = Envelope::new(0.0, segments("segments")).unwrap();
+    envelope.initial = if body["initial"] == "current" {
         Initial::Current
     } else {
         Initial::Value(body["initial"].as_f64().unwrap_or(0.0))
     };
-    contour.release = segments("release");
+    envelope.release = segments("release");
     if body["start"] == "event" {
-        contour.start = envelfo_core::contour::Start::Event;
+        envelope.start = envelfo_core::envelope::Start::Event;
     }
-    contour.markers = markers(body);
-    contour.playback = match body["playback"].as_str().unwrap_or("once") {
+    envelope.markers = markers(body);
+    envelope.playback = match body["playback"].as_str().unwrap_or("once") {
         "once" => Playback::Once,
         "loop" => Playback::Loop,
         "ping_pong" => Playback::PingPong,
@@ -389,14 +389,14 @@ fn contour(body: &Value) -> Contour {
     };
     if let Some(start) = body["loop_start"].as_str() {
         let end = body["loop_end"].as_str().unwrap();
-        contour.loop_bounds = Some((
-            contour
+        envelope.loop_bounds = Some((
+            envelope
                 .markers
                 .iter()
                 .find(|m| m.name == start)
                 .unwrap()
                 .position,
-            contour
+            envelope
                 .markers
                 .iter()
                 .find(|m| m.name == end)
@@ -404,8 +404,8 @@ fn contour(body: &Value) -> Contour {
                 .position,
         ));
     }
-    contour.repeat_count = body["repeat_count"].as_u64();
-    contour
+    envelope.repeat_count = body["repeat_count"].as_u64();
+    envelope
 }
 
 fn stages(body: &Value) -> Stages {
@@ -427,7 +427,7 @@ fn stages(body: &Value) -> Stages {
                     body: match body["kind"].as_str().unwrap() {
                         "hold" => Body::Hold(body["value"].as_f64().unwrap()),
                         "lfo" => Body::LFO(lfo(body)),
-                        "contour" => Body::Contour(contour(body)),
+                        "envelope" => Body::Envelope(envelope(body)),
                         _ => panic!("unsupported stage"),
                     },
                 }
@@ -477,7 +477,7 @@ fn patch_definition(body: &Value) -> patch::Patch {
                         body: lfo(body),
                         markers: markers(body),
                     },
-                    "contour" => patch::Node::Contour(contour(body)),
+                    "envelope" => patch::Node::Envelope(envelope(body)),
                     "stages" => patch::Node::Stages(stages(body)),
                     "affine" => patch::Node::Signal(signal::Operator::Affine {
                         input: body["input"].as_str().unwrap().into(),

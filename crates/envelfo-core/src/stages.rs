@@ -1,7 +1,7 @@
 //! Exact natural boundaries, transitions and externally commanded Stage playback.
 
-use crate::contour::{
-    Contour, Initial, Marker, Playback, Start, curve_at, duration, rate, validate_markers,
+use crate::envelope::{
+    Envelope, Initial, Marker, Playback, Start, curve_at, duration, rate, validate_markers,
 };
 use crate::lfo::{Command, Direction, Driver, LFO, Value};
 use crate::playback::{Position, check_order};
@@ -12,7 +12,7 @@ use crate::{Error, Status};
 pub enum Body {
     Hold(f64),
     LFO(LFO),
-    Contour(Contour),
+    Envelope(Envelope),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -119,7 +119,7 @@ impl Stages {
                     }
                     validate_markers(&stage.markers, false)?;
                 }
-                Body::Contour(c) => {
+                Body::Envelope(c) => {
                     c.validate()?;
                     if !stage.markers.is_empty()
                         || !c.release.is_empty()
@@ -128,7 +128,7 @@ impl Stages {
                         || (index == initial && c.initial == Initial::Current)
                     {
                         return Err(Error::InvalidDefinition(
-                            "invalid staged Contour release, start, duration or initial level",
+                            "invalid staged Envelope release, start, duration or initial level",
                         ));
                     }
                     if c.playback != Playback::Once
@@ -158,7 +158,7 @@ impl Stages {
                 let event = transition.event.as_str();
                 let allowed = matches!(event, "note_on" | "note_off" | "stage.done") || event.strip_prefix("cue.").is_some_and(|s| !s.is_empty())
                     || event.strip_prefix("stage.").is_some_and(|s| markers(stage).iter().any(|m| m.name == s)
-                        || matches!(&stage.body, Body::Contour(c) if c.playback != Playback::Once && (s == "cycle" || c.playback == Playback::PingPong && s == "turned")));
+                        || matches!(&stage.body, Body::Envelope(c) if c.playback != Playback::Once && (s == "cycle" || c.playback == Playback::PingPong && s == "turned")));
                 if !allowed {
                     return Err(Error::InvalidDefinition(
                         "transition references an unavailable Stage event",
@@ -173,7 +173,7 @@ impl Stages {
         self.validate()?;
         let stage = self.index(&self.initial_stage)?;
         let entry_value = match &self.stages[stage].body {
-            Body::Contour(c) => match c.initial {
+            Body::Envelope(c) => match c.initial {
                 Initial::Value(v) => v,
                 Initial::Current => unreachable!(),
             },
@@ -216,7 +216,7 @@ impl Stages {
                 status: Status::Held,
             }),
             Body::LFO(c) => c.staged_value(&position),
-            Body::Contour(c) => {
+            Body::Envelope(c) => {
                 let complete = c.repeat_count.is_some_and(|n| state.traversals >= n);
                 let coordinate = if complete {
                     c.boundary_coordinate(position.coordinate, position.direction)?
@@ -282,7 +282,7 @@ impl Stages {
                     next.position = next.position.advanced(at)?;
                     next.position.command(*c)?;
                     if matches!(c, Command::Shift(_))
-                        && matches!(&self.stages[next.stage].body, Body::Contour(c) if c.playback == Playback::Once)
+                        && matches!(&self.stages[next.stage].body, Body::Envelope(c) if c.playback == Playback::Once)
                     {
                         next.position.coordinate =
                             next.position.coordinate.clamp(Time::ZERO, Time::ONE);
@@ -376,7 +376,7 @@ impl Stages {
                 let stage = self.index(name)?;
                 let body = &self.stages[stage].body;
                 let entry_value = match body {
-                    Body::Contour(c) => match c.initial {
+                    Body::Envelope(c) => match c.initial {
                         Initial::Value(v) => v,
                         Initial::Current => value,
                     },
@@ -420,7 +420,7 @@ impl Stages {
             state.position = state.position.advanced(candidate.at)?;
             let mut final_repeat = false;
             let mut final_cycle = false;
-            if let Body::Contour(c) = &self.stages[stage].body {
+            if let Body::Envelope(c) = &self.stages[stage].body {
                 if let Some(count) = c.repeat_count {
                     if candidate.port
                         == if c.playback == Playback::Loop {
@@ -553,7 +553,7 @@ impl Stages {
                     }
                 }
             }
-            Body::Contour(c) if c.playback == Playback::Once => {
+            Body::Envelope(c) if c.playback == Playback::Once => {
                 for (order, marker) in c.markers.iter().enumerate() {
                     add(marker.position, order, &marker.name, after(order))?;
                 }
@@ -561,7 +561,7 @@ impl Stages {
                     add(Time::ONE, c.markers.len(), "done", after(c.markers.len()))?;
                 }
             }
-            Body::Contour(c) => {
+            Body::Envelope(c) => {
                 let (start, end) = c.bounds();
                 let width = end.checked_sub(start)?;
                 let period = if c.playback == Playback::Loop {
@@ -690,7 +690,7 @@ struct Candidate {
 
 fn markers(stage: &Stage) -> &[Marker] {
     match &stage.body {
-        Body::Contour(c) => &c.markers,
+        Body::Envelope(c) => &c.markers,
         _ => &stage.markers,
     }
 }
@@ -699,7 +699,7 @@ fn initial_position(body: &Body, at: Time) -> Result<Position, Error> {
     let (coordinate, rate) = match body {
         Body::Hold(_) => (Time::ZERO, Time::ZERO),
         Body::LFO(c) => (c.phase, c.rate),
-        Body::Contour(c) => (Time::ZERO, rate(&c.segments)?),
+        Body::Envelope(c) => (Time::ZERO, rate(&c.segments)?),
     };
     Ok(Position::new(at, coordinate, rate))
 }

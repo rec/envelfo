@@ -12,7 +12,7 @@
 //! ```
 #![forbid(unsafe_code)]
 
-pub mod contour;
+pub mod envelope;
 pub mod lfo;
 pub mod patch;
 mod playback;

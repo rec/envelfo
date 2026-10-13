@@ -3,13 +3,13 @@ from fractions import Fraction
 import pytest
 from pydantic import ValidationError
 from ufor.control import TempoMap
-from ufor.envelfo import Contour, EnvelfoEvent, EnvelfoUse
+from ufor.envelfo import EnvelfoEvent, EnvelfoUse, Envelope
 from ufor.segments import Segment
 
 from envelfo.runtime import envelfo_at, envelfo_event, initial_envelfo
 
 
-def test_beat_contour_follows_host_tempo_and_preserves_authored_unit() -> None:
+def test_beat_envelope_follows_host_tempo_and_preserves_authored_unit() -> None:
     clock = TempoMap.model_validate(
         {
             'points': [
@@ -22,7 +22,7 @@ def test_beat_contour_follows_host_tempo_and_preserves_authored_unit() -> None:
         {
             'clock': 'beats',
             'body': {
-                'kind': 'contour',
+                'kind': 'envelope',
                 'segments': [{'duration': '4 beat', 'to': 1}],
             },
         }
@@ -37,13 +37,13 @@ def test_beat_contour_follows_host_tempo_and_preserves_authored_unit() -> None:
     )
     assert envelfo_at(envelfo, state, clock.beat_at(Fraction(1))).value == 0.5
     assert envelfo_at(envelfo, state, clock.beat_at(Fraction(2))).value == 0.75
-    assert isinstance(envelfo.body, Contour)
+    assert isinstance(envelfo.body, Envelope)
     with pytest.raises(ValidationError, match='must match its clock'):
         EnvelfoUse.model_validate(
             {
                 'clock': 'beats',
                 'body': {
-                    'kind': 'contour',
+                    'kind': 'envelope',
                     'segments': [{'duration': '4 s', 'to': 1}],
                 },
             }
