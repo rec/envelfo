@@ -12,8 +12,11 @@
 //! ```
 #![forbid(unsafe_code)]
 
+pub mod contour;
 pub mod cycle;
+mod playback;
 pub mod random;
+pub mod stages;
 pub mod time;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -34,6 +37,7 @@ pub enum Error {
     TimeReversed,
     EventOrder,
     Unsupported(&'static str),
+    Capacity,
 }
 
 impl std::fmt::Display for Error {
@@ -46,6 +50,7 @@ impl std::fmt::Display for Error {
             Self::InvalidDefinition(message) | Self::Unsupported(message) => message,
             Self::TimeReversed => "query precedes current state; replay events to seek",
             Self::EventOrder => "commands must increase in time and ordinal order",
+            Self::Capacity => "Envelfo event capacity exceeded",
         })
     }
 }

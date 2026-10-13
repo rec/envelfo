@@ -78,6 +78,34 @@ impl Time {
         .reduced()
     }
 
+    pub fn floor(self) -> i64 {
+        self.numerator.div_euclid(self.denominator)
+    }
+
+    pub fn ceil(self) -> i64 {
+        self.floor() + i64::from(self.numerator.rem_euclid(self.denominator) != 0)
+    }
+
+    pub fn checked_abs(self) -> Result<Self, Error> {
+        if self.numerator < 0 {
+            Self::from_wide(-i128::from(self.numerator), i128::from(self.denominator))
+        } else {
+            Ok(self)
+        }
+    }
+
+    pub fn checked_mod(self, period: Self) -> Result<Self, Error> {
+        if period <= Self::ZERO {
+            return Err(Error::InvalidDefinition("modulus must be positive"));
+        }
+        let numerator = i128::from(self.numerator) * i128::from(period.denominator);
+        let modulus = i128::from(self.denominator) * i128::from(period.numerator);
+        Self::from_wide(
+            numerator.rem_euclid(modulus),
+            i128::from(self.denominator) * i128::from(period.denominator),
+        )
+    }
+
     /// Convert only signal evaluation to floating point, never event decisions.
     pub fn as_f64(self) -> f64 {
         self.numerator as f64 / self.denominator as f64

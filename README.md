@@ -4,8 +4,8 @@ Independent Python and Rust control libraries for envelopes, LFOs, Stages,
 composition and events. Extraction from uFor and enge is in progress.
 
 uFor owns the portable definitions. enveLFO owns their execution. The Python
-library requires neither NumPy nor an audio engine. The initial Rust core now
-supports exact Cycle playback and portable random words; the remaining bodies
+library requires neither NumPy nor an audio engine. The Rust core now
+supports exact Cycle, Contour and Stages playback and portable random words; composition
 and composition are still being extracted.
 
 ## Python
@@ -132,9 +132,30 @@ Conversions to and from arpeg's `num_rational::Ratio<i64>` are provided; incomin
 ratios are checked before normalization. Signal observations use floating point.
 The runtime dependency disables num-rational's default BigInt feature.
 
-The first slice passes the four Cycle traces and random vectors in the shared
-runtime corpus. Other trace bodies are not claimed as supported. Contours,
-Stages, Cycle marker emission, Patch operators/scheduling, host tempo maps,
+`Contour::new(initial, segments)` supplies ordinary attack defaults. Segment
+durations are exact times in the host's chosen seconds or beat clock; target
+levels and curve shapes are floating point. The host resolves named loop bounds
+to marker positions. Release starts at the captured current level, and retrigger,
+pause/reverse, seek/shift, looping and finite repeats follow the Python contract.
+Zero-duration segments apply immediately. Nonzero curves are supported here,
+unlike enge's existing persistent native preparation.
+
+`Stages::initial(at)` validates normalized Stage bodies and transitions.
+`Stages::advance(state, at, event)` processes natural boundaries and returns a
+scalar value plus ordered output events. `Stages::value` only observes state;
+it does not run transitions. `Stages::next_event` inspects the next boundary
+without advancing. Commands at a boundary preempt obsolete natural completion;
+markers precede loop boundaries, and finite repeats emit the boundary then
+`stage.done`. A finish transition emits `done`. Cycle markers are stored on their
+Stage; Contour markers are part of the Contour definition. Contour/Stage states
+can be cloned for continuation, and failed advances leave the supplied state
+unchanged. One advance is limited to 4096 emitted events, with an explicit
+capacity error rather than dropped events. Public Rust definition fields are
+normalized host inputs, not an authored-document/Pint parser; initialize state
+again after changing a definition.
+
+All ten body traces and random vectors in the shared runtime corpus now pass
+directly in Rust. Top-level Cycle marker emission, Patch operators/scheduling, host tempo maps,
 serialized snapshots and optional Python bindings remain Rust extraction work.
 The existing enge native playback still has floating-point event positions;
 using the extracted random-word kernel does not claim exact native timing.

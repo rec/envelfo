@@ -2,6 +2,7 @@
 
 use std::f64::consts::TAU;
 
+use crate::playback::{Position, check_order};
 use crate::time::Time;
 use crate::{Error, Status};
 
@@ -98,13 +99,8 @@ impl Cycle {
     pub fn initial(&self, at: Time) -> Result<CycleState, Error> {
         self.validate()?;
         Ok(CycleState {
-            at,
             ordinal: None,
-            coordinate: self.phase,
-            rate: self.rate,
-            age: Time::ZERO,
-            direction: Direction::Forward,
-            paused: false,
+            position: Position::new(at, self.phase, self.rate),
         })
     }
 
@@ -113,7 +109,7 @@ impl Cycle {
         let (coordinate, weight) = if self.driver == Driver::Transport {
             (self.phase.checked_add(self.rate.checked_mul(at)?)?, 1.0)
         } else {
-            let position = state.position_at(at)?;
+            let position = state.position.advanced(at)?;
             let weight = if position.age < self.delay {
                 0.0
             } else if self.fade == Time::ZERO {
@@ -128,6 +124,26 @@ impl Cycle {
             };
             (position.coordinate, weight)
         };
+        self.signal(coordinate, weight, false)
+    }
+
+    pub(crate) fn staged_value(&self, position: &Position) -> Result<Value, Error> {
+        let weight = if position.age < self.delay {
+            0.0
+        } else if self.fade == Time::ZERO {
+            1.0
+        } else {
+            let active = position.age.checked_sub(self.delay)?;
+            if active >= self.fade {
+                1.0
+            } else {
+                active.as_f64() / self.fade.as_f64()
+            }
+        };
+        self.signal(position.coordinate, weight, true)
+    }
+
+    fn signal(&self, coordinate: Time, weight: f64, staged: bool) -> Result<Value, Error> {
         let phase = coordinate.modulo_one();
         let shape = match self.shape {
             Shape::Sine => (TAU * phase.as_f64()).sin(),
@@ -148,8 +164,8 @@ impl Cycle {
             }
         };
         Ok(Value {
-            value: self.center + self.depth * shape,
-            weight,
+            value: self.center + self.depth * shape * if staged { weight } else { 1.0 },
+            weight: if staged { 1.0 } else { weight },
             status: Status::Running,
         })
     }
@@ -168,34 +184,15 @@ impl Cycle {
                 "transport-position Cycle does not accept phase commands",
             ));
         }
-        if at < state.at
-            || (at == state.at && state.ordinal.is_some_and(|previous| ordinal <= previous))
-        {
-            return Err(Error::EventOrder);
-        }
-        let mut next = state.position_at(at)?;
+        check_order(state.position.at, state.ordinal, at, ordinal)?;
+        let mut next = state.position.advanced(at)?;
         match command {
-            Command::Pause => next.paused = true,
-            Command::Resume => next.paused = false,
-            Command::Reverse => {
-                next.direction = match next.direction {
-                    Direction::Forward => Direction::Reverse,
-                    Direction::Reverse => Direction::Forward,
-                }
-            }
-            Command::Seek(position) => {
-                if position < Time::ZERO || position > Time::ONE {
-                    return Err(Error::InvalidDefinition("seek position must be in [0, 1]"));
-                }
-                next.coordinate = position;
-            }
-            Command::Shift(offset) => next.coordinate = next.coordinate.checked_add(offset)?,
-            Command::Rate(rate) => {
-                if rate < Time::ZERO {
-                    return Err(Error::InvalidDefinition("rate must be nonnegative"));
-                }
-                next.rate = rate;
-            }
+            Command::Pause
+            | Command::Resume
+            | Command::Reverse
+            | Command::Seek(_)
+            | Command::Shift(_)
+            | Command::Rate(_) => next.command(command)?,
             Command::Reset => {
                 next.coordinate = self.phase;
                 next.age = Time::ZERO;
@@ -210,8 +207,10 @@ impl Cycle {
             }
             Command::NoteOn | Command::NoteOff | Command::Transport => {}
         }
-        next.ordinal = Some(ordinal);
-        *state = next;
+        *state = CycleState {
+            position: next,
+            ordinal: Some(ordinal),
+        };
         Ok(())
     }
 }
@@ -224,33 +223,8 @@ pub enum Direction {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CycleState {
-    at: Time,
     ordinal: Option<u64>,
-    coordinate: Time,
-    rate: Time,
-    age: Time,
-    direction: Direction,
-    paused: bool,
-}
-
-impl CycleState {
-    fn position_at(&self, at: Time) -> Result<Self, Error> {
-        if at < self.at {
-            return Err(Error::TimeReversed);
-        }
-        let elapsed = at.checked_sub(self.at)?;
-        let mut next = self.clone();
-        if !self.paused {
-            let offset = self.rate.checked_mul(elapsed)?;
-            next.coordinate = match self.direction {
-                Direction::Forward => self.coordinate.checked_add(offset)?,
-                Direction::Reverse => self.coordinate.checked_sub(offset)?,
-            };
-            next.age = self.age.checked_add(elapsed)?;
-        }
-        next.at = at;
-        Ok(next)
-    }
+    position: Position,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

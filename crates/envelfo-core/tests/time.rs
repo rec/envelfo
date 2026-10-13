@@ -1,5 +1,23 @@
 use envelfo_core::Error;
 use envelfo_core::time::Time;
+
+#[test]
+fn floor_ceil_absolute_and_modulo_preserve_negative_rational_boundaries() {
+    let negative = Time::new(-7, 3).unwrap();
+    assert_eq!(negative.floor(), -3);
+    assert_eq!(negative.ceil(), -2);
+    assert_eq!(negative.checked_abs().unwrap(), Time::new(7, 3).unwrap());
+    assert_eq!(
+        negative.checked_mod(Time::new(1, 2).unwrap()).unwrap(),
+        Time::new(1, 6).unwrap()
+    );
+    assert_eq!(Time::from_integer(i64::MAX).ceil(), i64::MAX);
+    assert_eq!(
+        Time::from_integer(i64::MIN).checked_abs(),
+        Err(envelfo_core::Error::Overflow)
+    );
+    assert!(negative.checked_mod(Time::ZERO).is_err());
+}
 use num_rational::Ratio;
 
 #[test]
