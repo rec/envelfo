@@ -54,12 +54,12 @@ def transform_value(
     return value
 
 
-def cycle_lfo(definition: envelfo.EnvelfoUse) -> lfo.LFO:
+def lfo_definition(definition: envelfo.EnvelfoUse) -> lfo.LFO:
     body = definition.body
-    if not isinstance(body, envelfo.Cycle):
-        raise ValueError('envelfo is not a cycle')
+    if not isinstance(body, envelfo.LFO):
+        raise ValueError('envelfo is not an LFO')
     if isinstance(body.rate, envelfo.ParameterReference):
-        raise ValueError('cycle rate has an unresolved public parameter')
+        raise ValueError('LFO rate has an unresolved public parameter')
     return lfo.LFO(
         clock=definition.clock,
         scope=definition.scope,
@@ -108,10 +108,10 @@ def initial_envelfo(
                 random_state=random_state,
             )
         )
-    if isinstance(definition.body, envelfo.Cycle):
+    if isinstance(definition.body, envelfo.LFO):
         assert isinstance(definition.body.rate, Fraction)
         return envelfo.EnvelfoState(
-            runtime=envelfo.CycleState(
+            runtime=envelfo.LFOState(
                 at=at,
                 position=envelfo.EnvelfoPosition(
                     at=at, coordinate=definition.body.phase, rate=definition.body.rate
@@ -168,8 +168,8 @@ def envelfo_at(
         return envelfo.EnvelfoValue(
             value=state.runtime.value, weight=1.0, status='held'
         )
-    if isinstance(definition.body, envelfo.Cycle) and isinstance(
-        state.runtime, envelfo.CycleState
+    if isinstance(definition.body, envelfo.LFO) and isinstance(
+        state.runtime, envelfo.LFOState
     ):
         position = state.runtime.position
         if definition.position_driver == envelfo.PositionDriver.transport:
@@ -254,18 +254,18 @@ def envelfo_event(
             )
         )
     if definition.position_driver == envelfo.PositionDriver.transport:
-        raise ValueError('transport-position Cycle does not accept phase commands')
+        raise ValueError('transport-position LFO does not accept phase commands')
     if isinstance(definition.body, envelfo.Stages) and isinstance(
         state.runtime, envelfo.StageState
     ):
         return advance_envelfo(definition, state, event.at, event).state
-    if isinstance(definition.body, envelfo.Cycle) and isinstance(
-        state.runtime, envelfo.CycleState
+    if isinstance(definition.body, envelfo.LFO) and isinstance(
+        state.runtime, envelfo.LFOState
     ):
         if event.action == 'cue':
-            raise ValueError('cycles do not accept cue events')
+            raise ValueError('LFOs do not accept cue events')
         if event.action == 'sample':
-            raise ValueError('cycles do not accept sample events')
+            raise ValueError('LFOs do not accept sample events')
         control.check_order(state.runtime.at, state.runtime.ordinal, event)
         position = _position_at(state.runtime.position, event.at)
         if event.action in ('note_on', 'reset', 'transport'):
@@ -286,7 +286,7 @@ def envelfo_event(
         else:
             position = _position_command(position, event)
         return envelfo.EnvelfoState(
-            runtime=envelfo.CycleState(
+            runtime=envelfo.LFOState(
                 at=event.at, ordinal=event.ordinal, position=position
             )
         )
@@ -542,7 +542,7 @@ def next_stage_event(
                 if state.cursor_order == order:
                     candidates.append((state.at, order + 1, 'cycle'))
     else:
-        assert isinstance(stage, envelfo.Cycle)
+        assert isinstance(stage, envelfo.LFO)
         for index, marker in enumerate(stage.markers):
             offset = start - marker.position
             turn = floor(offset) + 1 if forward else ceil(offset) - 1
@@ -656,9 +656,9 @@ def _repeat_boundary_coordinate(
 
 
 def _initial_position(
-    body: envelfo.Hold | envelfo.Cycle | envelfo.Contour, at: Fraction
+    body: envelfo.Hold | envelfo.LFO | envelfo.Contour, at: Fraction
 ) -> envelfo.EnvelfoPosition:
-    if isinstance(body, envelfo.Cycle):
+    if isinstance(body, envelfo.LFO):
         assert isinstance(body.rate, Fraction)
         return envelfo.EnvelfoPosition(at=at, coordinate=body.phase, rate=body.rate)
     if isinstance(body, envelfo.Contour):
@@ -989,7 +989,7 @@ def _stage_value(
         return envelfo.EnvelfoValue(value=stage.value, weight=1, status='held')
     position = state.position
     coordinate = _coordinate_at(position, at)
-    if isinstance(stage, envelfo.Cycle):
+    if isinstance(stage, envelfo.LFO):
         phase = coordinate % 1
         age = _age_at(position, at)
         if age < stage.delay:

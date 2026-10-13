@@ -1,19 +1,19 @@
 //! Standalone control playback. Hosts supply normalized definitions and time.
 //!
 //! ```
-//! use envelfo_core::cycle::Cycle;
+//! use envelfo_core::lfo::LFO;
 //! use envelfo_core::time::Time;
 //! # fn main() -> Result<(), envelfo_core::Error> {
-//! let cycle = Cycle::new(Time::ONE)?;
-//! let state = cycle.initial(Time::ZERO)?;
-//! assert_eq!(cycle.value(&state, Time::new(1, 4)?)?.value, 1.0);
+//! let lfo = LFO::new(Time::ONE)?;
+//! let state = lfo.initial(Time::ZERO)?;
+//! assert_eq!(lfo.value(&state, Time::new(1, 4)?)?.value, 1.0);
 //! # Ok(())
 //! # }
 //! ```
 #![forbid(unsafe_code)]
 
 pub mod contour;
-pub mod cycle;
+pub mod lfo;
 pub mod patch;
 mod playback;
 pub mod random;

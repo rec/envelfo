@@ -1,6 +1,6 @@
 use envelfo_core::Status;
 use envelfo_core::contour::{Contour, ContourCommand, Initial, Marker, Playback, Segment};
-use envelfo_core::cycle::{Clock, Command, Cycle, Driver, Reset, Shape};
+use envelfo_core::lfo::{Clock, Command, Driver, LFO, Reset, Shape};
 use envelfo_core::random::random_word;
 use envelfo_core::stages::{Action, Body, Event, Stage, StageCommand, Stages, Transition};
 use envelfo_core::time::Time;
@@ -9,19 +9,19 @@ use serde_json::Value;
 
 #[test]
 fn triangle_quarter_turns_match_shared_trace() {
-    check_cycle("triangle-quarter-turns");
+    check_lfo("triangle-quarter-turns");
 }
 #[test]
 fn activation_weight_matches_shared_trace() {
-    check_cycle("cycle-delay-and-fade-are-weight");
+    check_lfo("lfo-delay-and-fade-are-weight");
 }
 #[test]
 fn rate_pause_and_resume_match_shared_trace() {
-    check_cycle("cycle-rate-pause-and-resume");
+    check_lfo("lfo-rate-pause-and-resume");
 }
 #[test]
 fn transport_position_matches_shared_trace() {
-    check_cycle("transport-cycle-queries-song-position-directly");
+    check_lfo("transport-lfo-queries-song-position-directly");
 }
 
 #[test]
@@ -154,7 +154,7 @@ fn contours_and_stages_match_every_shared_trace() {
                     }
                 }
             }
-            "cycle" => {}
+            "lfo" => {}
             _ => panic!("unverified body"),
         }
     }
@@ -225,7 +225,7 @@ fn rational(value: &Value) -> Time {
     }
 }
 
-fn check_cycle(name: &str) {
+fn check_lfo(name: &str) {
     let corpus = corpus();
     let case = corpus["cases"]
         .as_array()
@@ -235,19 +235,19 @@ fn check_cycle(name: &str) {
         .unwrap();
     let definition = &case["definition"];
     let body = &definition["body"];
-    assert_eq!(body["kind"], "cycle");
+    assert_eq!(body["kind"], "lfo");
     assert!(
         body["markers"].is_null() || body["markers"].as_array().unwrap().is_empty(),
-        "Cycle marker emission is not extracted yet"
+        "LFO marker emission is not extracted yet"
     );
-    let mut cycle = cycle(body);
+    let mut lfo = lfo(body);
     if definition["clock"] == "beats" {
-        cycle.clock = Clock::Beats;
+        lfo.clock = Clock::Beats;
     }
     if definition["position_driver"] == "transport" {
-        cycle.driver = Driver::Transport;
+        lfo.driver = Driver::Transport;
     }
-    let mut state = cycle.initial(Time::ZERO).unwrap();
+    let mut state = lfo.initial(Time::ZERO).unwrap();
     for step in case["steps"].as_array().unwrap() {
         assert!(step["events"].is_null() || step["events"].as_array().unwrap().is_empty());
         assert!(step["runtime"].is_null() || step["runtime"].as_object().unwrap().is_empty());
@@ -258,50 +258,49 @@ fn check_cycle(name: &str) {
         let event = &step["event"];
         if !event.is_null() {
             assert_eq!(at, rational(&event["at"]));
-            cycle
-                .command(
-                    &mut state,
-                    at,
-                    event["ordinal"].as_u64().unwrap(),
-                    command(event),
-                )
-                .unwrap();
+            lfo.command(
+                &mut state,
+                at,
+                event["ordinal"].as_u64().unwrap(),
+                command(event),
+            )
+            .unwrap();
         }
-        check_value(cycle.value(&state, at).unwrap(), step);
+        check_value(lfo.value(&state, at).unwrap(), step);
     }
 }
 
-fn cycle(body: &Value) -> Cycle {
-    let mut cycle = Cycle::new(rational(&body["rate"])).unwrap();
-    cycle.shape = match body["shape"].as_str().unwrap_or("sine") {
+fn lfo(body: &Value) -> LFO {
+    let mut lfo = LFO::new(rational(&body["rate"])).unwrap();
+    lfo.shape = match body["shape"].as_str().unwrap_or("sine") {
         "sine" => Shape::Sine,
         "square" => Shape::Square,
         "triangle" => Shape::Triangle,
         _ => panic!("unsupported shape"),
     };
     if let Some(center) = body["center"].as_f64() {
-        cycle.center = center;
+        lfo.center = center;
     }
     if let Some(depth) = body["depth"].as_f64() {
-        cycle.depth = depth;
+        lfo.depth = depth;
     }
     for (key, destination) in [
-        ("phase", &mut cycle.phase),
-        ("duty_cycle", &mut cycle.duty),
-        ("delay", &mut cycle.delay),
-        ("fade_in", &mut cycle.fade),
+        ("phase", &mut lfo.phase),
+        ("duty_cycle", &mut lfo.duty),
+        ("delay", &mut lfo.delay),
+        ("fade_in", &mut lfo.fade),
     ] {
         if !body[key].is_null() {
             *destination = rational(&body[key]);
         }
     }
-    cycle.reset = match body["reset"].as_str().unwrap_or("trigger") {
+    lfo.reset = match body["reset"].as_str().unwrap_or("trigger") {
         "trigger" => Reset::Trigger,
         "transport" => Reset::Transport,
         "free" => Reset::Free,
         _ => panic!("unsupported reset"),
     };
-    cycle
+    lfo
 }
 
 fn command(event: &Value) -> Command {
@@ -315,7 +314,7 @@ fn command(event: &Value) -> Command {
     }
 }
 
-fn check_value(value: envelfo_core::cycle::Value, step: &Value) {
+fn check_value(value: envelfo_core::lfo::Value, step: &Value) {
     assert!(
         (value.value - step["expected"]["value"].as_f64().unwrap()).abs() <= 1e-12,
         "{value:?} at {}",
@@ -420,14 +419,14 @@ fn stages(body: &Value) -> Stages {
                 let body = &s["envelfo"];
                 Stage {
                     name: s["name"].as_str().unwrap().into(),
-                    markers: if body["kind"] == "cycle" {
+                    markers: if body["kind"] == "lfo" {
                         markers(body)
                     } else {
                         vec![]
                     },
                     body: match body["kind"].as_str().unwrap() {
                         "hold" => Body::Hold(body["value"].as_f64().unwrap()),
-                        "cycle" => Body::Cycle(cycle(body)),
+                        "lfo" => Body::LFO(lfo(body)),
                         "contour" => Body::Contour(contour(body)),
                         _ => panic!("unsupported stage"),
                     },
@@ -474,8 +473,8 @@ fn patch_definition(body: &Value) -> patch::Patch {
             .map(|(name, body)| patch::Child {
                 name: name.clone(),
                 node: match body["kind"].as_str().unwrap() {
-                    "cycle" => patch::Node::Cycle {
-                        body: cycle(body),
+                    "lfo" => patch::Node::LFO {
+                        body: lfo(body),
                         markers: markers(body),
                     },
                     "contour" => patch::Node::Contour(contour(body)),

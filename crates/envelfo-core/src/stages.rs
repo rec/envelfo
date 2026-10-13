@@ -3,7 +3,7 @@
 use crate::contour::{
     Contour, Initial, Marker, Playback, Start, curve_at, duration, rate, validate_markers,
 };
-use crate::cycle::{Command, Cycle, Direction, Driver, Value};
+use crate::lfo::{Command, Direction, Driver, LFO, Value};
 use crate::playback::{Position, check_order};
 use crate::time::Time;
 use crate::{Error, Status};
@@ -11,7 +11,7 @@ use crate::{Error, Status};
 #[derive(Clone, Debug, PartialEq)]
 pub enum Body {
     Hold(f64),
-    Cycle(Cycle),
+    LFO(LFO),
     Contour(Contour),
 }
 
@@ -110,11 +110,11 @@ impl Stages {
                     return Err(Error::InvalidDefinition("Hold cannot have markers"));
                 }
                 Body::Hold(_) => {}
-                Body::Cycle(c) => {
+                Body::LFO(c) => {
                     c.validate()?;
                     if c.driver != Driver::Elapsed {
                         return Err(Error::InvalidDefinition(
-                            "Stage Cycle requires elapsed position",
+                            "Stage LFO requires elapsed position",
                         ));
                     }
                     validate_markers(&stage.markers, false)?;
@@ -215,7 +215,7 @@ impl Stages {
                 weight: 1.0,
                 status: Status::Held,
             }),
-            Body::Cycle(c) => c.staged_value(&position),
+            Body::LFO(c) => c.staged_value(&position),
             Body::Contour(c) => {
                 let complete = c.repeat_count.is_some_and(|n| state.traversals >= n);
                 let coordinate = if complete {
@@ -538,7 +538,7 @@ impl Stages {
         };
         match &stage.body {
             Body::Hold(_) => {}
-            Body::Cycle(_) => {
+            Body::LFO(_) => {
                 for (order, marker) in stage.markers.iter().enumerate() {
                     let offset = coordinate.checked_sub(marker.position)?;
                     let turn = next_integer(offset, forward)?;
@@ -698,7 +698,7 @@ fn markers(stage: &Stage) -> &[Marker] {
 fn initial_position(body: &Body, at: Time) -> Result<Position, Error> {
     let (coordinate, rate) = match body {
         Body::Hold(_) => (Time::ZERO, Time::ZERO),
-        Body::Cycle(c) => (c.phase, c.rate),
+        Body::LFO(c) => (c.phase, c.rate),
         Body::Contour(c) => (Time::ZERO, rate(&c.segments)?),
     };
     Ok(Position::new(at, coordinate, rate))

@@ -1,6 +1,6 @@
 //! Normalized contour definitions and exact attack/release playback.
 
-use crate::cycle::{Command, Direction, Value};
+use crate::lfo::{Command, Direction, Value};
 use crate::playback::{Position, check_order};
 use crate::time::Time;
 use crate::{Error, Status};

@@ -1,15 +1,15 @@
 //! Host-observed signal graphs and exact, bounded connection scheduling.
 //!
 //! ```
-//! use envelfo_core::cycle::{Cycle, Shape};
+//! use envelfo_core::lfo::{LFO, Shape};
 //! use envelfo_core::patch::{Child, Node, Output, Patch, Seconds};
 //! use envelfo_core::time::Time;
 //! # fn main() -> Result<(), envelfo_core::Error> {
-//! let mut cycle = Cycle::new(Time::ONE)?;
-//! cycle.shape = Shape::Triangle;
+//! let mut lfo = LFO::new(Time::ONE)?;
+//! lfo.shape = Shape::Triangle;
 //! let patch = Patch {
 //!     children: vec![Child {
-//!         name: "wave".into(), node: Node::Cycle { body: cycle, markers: vec![] },
+//!         name: "wave".into(), node: Node::LFO { body: lfo, markers: vec![] },
 //!     }],
 //!     outputs: vec![Output { name: "value".into(), source: "wave".into() }],
 //!     event_outputs: vec![], connections: vec![],
@@ -28,7 +28,7 @@ use crate::contour::{
     Contour, ContourCommand, ContourState, Initial, Marker, Playback, Retrigger, Start,
     validate_markers,
 };
-use crate::cycle::{Command, Cycle, CycleState, Direction, Driver};
+use crate::lfo::{Command, Direction, Driver, LFO, LFOState};
 use crate::random::{random_word, stream_key};
 use crate::sample_hold::{SampleCommand, SampleHold, SampleState};
 use crate::signal::Operator;
@@ -57,7 +57,7 @@ impl ClockMapping for Seconds {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Node {
-    Cycle { body: Cycle, markers: Vec<Marker> },
+    LFO { body: LFO, markers: Vec<Marker> },
     Contour(Contour),
     Stages(Stages),
     SampleHold(SampleHold),
@@ -177,7 +177,7 @@ impl Patch {
             .iter()
             .map(|child| {
                 Ok(match &child.node {
-                    Node::Cycle { body, .. } => Some(ChildState::Cycle(body.initial(local)?)),
+                    Node::LFO { body, .. } => Some(ChildState::Lfo(body.initial(local)?)),
                     Node::Contour(body) => Some(ChildState::Contour(body.initial(local)?)),
                     Node::Stages(body) => Some(ChildState::Stages(body.initial(local)?)),
                     Node::SampleHold(body) => Some(ChildState::Sample(body.initial(
@@ -303,12 +303,12 @@ impl Patch {
                 return Err(Error::InvalidDefinition("invalid or duplicate Patch child"));
             }
             match &child.node {
-                Node::Cycle { body, markers } => {
+                Node::LFO { body, markers } => {
                     body.validate()?;
                     validate_markers(markers, false)?;
                     if body.driver != Driver::Elapsed {
                         return Err(Error::InvalidDefinition(
-                            "Patch Cycle requires elapsed position",
+                            "Patch LFO requires elapsed position",
                         ));
                     }
                 }
@@ -444,7 +444,7 @@ impl Patch {
     fn validate_port(&self, port: &Port) -> Result<(), Error> {
         let node = &self.children[self.index(&port.child)?].node;
         let valid = match node {
-            Node::Cycle { markers, .. } => markers.iter().any(|m| m.name == port.port),
+            Node::LFO { markers, .. } => markers.iter().any(|m| m.name == port.port),
             Node::Signal(Operator::Threshold { .. }) => {
                 matches!(port.port.as_str(), "rising" | "falling")
             }
@@ -472,7 +472,7 @@ impl Patch {
 
     fn value(&self, index: usize, state: &ChildState, local: Time) -> Result<f64, Error> {
         let value = match (&self.children[index].node, state) {
-            (Node::Cycle { body, .. }, ChildState::Cycle(state)) => body.value(state, local)?,
+            (Node::LFO { body, .. }, ChildState::Lfo(state)) => body.value(state, local)?,
             (Node::Contour(body), ChildState::Contour(state)) => body.value(state, local)?,
             (Node::Stages(body), ChildState::Stages(state)) => body.value(state, local)?,
             (Node::SampleHold(body), ChildState::Sample(state)) => body.value(state, local)?,
@@ -547,11 +547,7 @@ impl Patch {
             "commands require an executable Patch child",
         ))?;
         let outputs = match (&self.children[target].node, current, &event.command) {
-            (
-                Node::Cycle { body, .. },
-                ChildState::Cycle(current),
-                ChildCommand::Playback(command),
-            ) => {
+            (Node::LFO { body, .. }, ChildState::Lfo(current), ChildCommand::Playback(command)) => {
                 body.command(current, local, event.ordinal, *command)?;
                 vec![]
             }
@@ -623,7 +619,7 @@ impl Patch {
                 .map(|e| e.at)
                 .min();
             let local_limit = clock.local_time(limit)?;
-            let mut cycles = vec![];
+            let mut lfos = vec![];
             for (index, child) in self.children.iter().enumerate() {
                 match (&child.node, &state.children[index]) {
                     (Node::Stages(body), Some(ChildState::Stages(current))) => {
@@ -636,7 +632,7 @@ impl Patch {
                             }
                         }
                     }
-                    (Node::Cycle { markers, .. }, Some(ChildState::Cycle(current)))
+                    (Node::LFO { markers, .. }, Some(ChildState::Lfo(current)))
                         if !markers.is_empty() =>
                     {
                         let position = &current.position;
@@ -669,7 +665,7 @@ impl Patch {
                                 .host_time(local)?
                                 .ok_or(Error::InvalidDefinition("local marker has no host time"))?;
                             if within(seconds) {
-                                cycles.push((seconds, index, marker.name.clone(), local));
+                                lfos.push((seconds, index, marker.name.clone(), local));
                                 next = Some(next.map_or(seconds, |n| n.min(seconds)));
                             }
                         }
@@ -692,7 +688,7 @@ impl Patch {
                     }
                 }
             }
-            for (at, index, port, local) in cycles {
+            for (at, index, port, local) in lfos {
                 if at == seconds {
                     processed += 1;
                     self.route(
@@ -777,7 +773,7 @@ impl Patch {
 
 #[derive(Clone, Debug, PartialEq)]
 enum ChildState {
-    Cycle(CycleState),
+    Lfo(LFOState),
     Contour(ContourState),
     Stages(StageState),
     Sample(SampleState),
@@ -786,7 +782,7 @@ enum ChildState {
 impl ChildState {
     fn next_ordinal(&self) -> Result<u64, Error> {
         let ordinal = match self {
-            Self::Cycle(s) => s.ordinal,
+            Self::Lfo(s) => s.ordinal,
             Self::Contour(s) => s.ordinal,
             Self::Stages(s) => s.ordinal,
             Self::Sample(s) => s.ordinal,

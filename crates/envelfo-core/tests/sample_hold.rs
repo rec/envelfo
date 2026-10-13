@@ -1,5 +1,5 @@
 use envelfo_core::Error;
-use envelfo_core::cycle::Command;
+use envelfo_core::lfo::Command;
 use envelfo_core::random::random_word;
 use envelfo_core::sample_hold::{SampleCommand, SampleHold};
 use envelfo_core::time::Time;

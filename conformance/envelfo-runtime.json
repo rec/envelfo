@@ -10,7 +10,7 @@
     },
     {
       "name": "triangle-quarter-turns",
-      "definition": {"body": {"kind": "cycle", "shape": "triangle", "rate": "1"}},
+      "definition": {"body": {"kind": "lfo", "shape": "triangle", "rate": "1"}},
       "steps": [
         {"at": "0", "expected": {"value": -1, "weight": 1, "status": "running"}},
         {"at": "1/4", "expected": {"value": 0, "weight": 1, "status": "running"}},
@@ -20,8 +20,8 @@
       ]
     },
     {
-      "name": "cycle-delay-and-fade-are-weight",
-      "definition": {"body": {"kind": "cycle", "shape": "square", "rate": "1", "delay": "1/4", "fade_in": "1/2"}},
+      "name": "lfo-delay-and-fade-are-weight",
+      "definition": {"body": {"kind": "lfo", "shape": "square", "rate": "1", "delay": "1/4", "fade_in": "1/2"}},
       "steps": [
         {"at": "0", "expected": {"value": 1, "weight": 0, "status": "running"}},
         {"at": "1/4", "expected": {"value": 1, "weight": 0, "status": "running"}},
@@ -30,8 +30,8 @@
       ]
     },
     {
-      "name": "staged-cycle-fade-is-in-value",
-      "definition": {"body": {"kind": "stages", "initial_stage": "wave", "stages": [{"name": "wave", "envelfo": {"kind": "cycle", "shape": "square", "rate": "1", "delay": "1/4", "fade_in": "1/2", "center": 0.25, "depth": 0.5}}]}},
+      "name": "staged-lfo-fade-is-in-value",
+      "definition": {"body": {"kind": "stages", "initial_stage": "wave", "stages": [{"name": "wave", "envelfo": {"kind": "lfo", "shape": "square", "rate": "1", "delay": "1/4", "fade_in": "1/2", "center": 0.25, "depth": 0.5}}]}},
       "steps": [
         {"at": "0", "expected": {"value": 0.25, "weight": 1, "status": "running"}},
         {"at": "1/4", "expected": {"value": 0.25, "weight": 1, "status": "running"}},
@@ -40,8 +40,8 @@
       ]
     },
     {
-      "name": "cycle-rate-pause-and-resume",
-      "definition": {"body": {"kind": "cycle", "shape": "triangle", "rate": "1"}},
+      "name": "lfo-rate-pause-and-resume",
+      "definition": {"body": {"kind": "lfo", "shape": "triangle", "rate": "1"}},
       "steps": [
         {"at": "1/4", "event": {"at": "1/4", "ordinal": 0, "action": "rate", "rate": "2"}, "expected": {"value": 0, "weight": 1, "status": "running"}},
         {"at": "3/8", "event": {"at": "3/8", "ordinal": 0, "action": "pause"}, "expected": {"value": 1, "weight": 1, "status": "running"}},
@@ -85,8 +85,8 @@
       ]
     },
     {
-      "name": "cycle-markers-preserve-exact-time-and-partitions",
-      "definition": {"body": {"kind": "stages", "initial_stage": "wave", "stages": [{"name": "wave", "envelfo": {"kind": "cycle", "shape": "triangle", "rate": "3", "markers": [{"name": "quarter", "position": "1/4"}]}}]}},
+      "name": "lfo-markers-preserve-exact-time-and-partitions",
+      "definition": {"body": {"kind": "stages", "initial_stage": "wave", "stages": [{"name": "wave", "envelfo": {"kind": "lfo", "shape": "triangle", "rate": "3", "markers": [{"name": "quarter", "position": "1/4"}]}}]}},
       "steps": [
         {"at": "1/12", "expected": {"value": 0, "weight": 1, "status": "running"}, "events": [{"at": "1/12", "port": "quarter", "stage": "wave", "activation": 0}]},
         {"at": "1/6", "restore": true, "expected": {"value": 1, "weight": 1, "status": "running"}},
@@ -109,8 +109,8 @@
       ]
     },
     {
-      "name": "transport-cycle-queries-song-position-directly",
-      "definition": {"clock": "beats", "position_driver": "transport", "body": {"kind": "cycle", "shape": "triangle", "rate": "1/4", "reset": "transport"}},
+      "name": "transport-lfo-queries-song-position-directly",
+      "definition": {"clock": "beats", "position_driver": "transport", "body": {"kind": "lfo", "shape": "triangle", "rate": "1/4", "reset": "transport"}},
       "steps": [
         {"at": "0", "expected": {"value": -1, "weight": 1, "status": "running"}},
         {"at": "2", "expected": {"value": 1, "weight": 1, "status": "running"}},

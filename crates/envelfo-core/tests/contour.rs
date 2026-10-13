@@ -1,7 +1,7 @@
 use envelfo_core::contour::{
     Contour, ContourCommand, Initial, Marker, Playback, Retrigger, Segment, Start,
 };
-use envelfo_core::cycle::{Command, Direction};
+use envelfo_core::lfo::{Command, Direction};
 use envelfo_core::time::Time;
 use envelfo_core::{Error, Status};
 

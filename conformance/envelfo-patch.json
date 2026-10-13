@@ -7,8 +7,8 @@
         "envelfos": {
           "edge_z": {"kind": "threshold", "input": "root_z", "lower": -0.25, "upper": 0.25},
           "edge_a": {"kind": "threshold", "input": "root_a", "lower": -0.25, "upper": 0.25},
-          "root_a": {"kind": "cycle", "shape": "triangle", "rate": "1"},
-          "root_z": {"kind": "cycle", "shape": "triangle", "rate": "1"}
+          "root_a": {"kind": "lfo", "shape": "triangle", "rate": "1"},
+          "root_z": {"kind": "lfo", "shape": "triangle", "rate": "1"}
         },
         "outputs": {"a": "edge_a", "z": "edge_z"},
         "event_outputs": {"a-rise": "edge_a.rising", "z-rise": "edge_z.rising"}
@@ -30,7 +30,7 @@
           "slew": {"kind": "slew", "input": "scaled", "rise": 2, "fall": 1, "initial": 0},
           "edge": {"kind": "threshold", "input": "clock", "lower": -0.25, "upper": 0.25},
           "scaled": {"kind": "affine", "input": "clock", "scale": 2, "offset": 1},
-          "clock": {"kind": "cycle", "shape": "triangle", "rate": "1"}
+          "clock": {"kind": "lfo", "shape": "triangle", "rate": "1"}
         },
         "outputs": {"sum": "sum", "product": "product", "grid": "grid", "held": "left", "slew": "slew", "gate": "edge"},
         "event_outputs": {"rise": "edge.rising", "fall": "edge.falling"}
@@ -49,7 +49,7 @@
         "body": {
           "kind": "patch",
           "envelfos": {
-            "clock": {"kind": "cycle", "rate": "1", "markers": [{"name": "tick", "position": "1/4"}]},
+            "clock": {"kind": "lfo", "rate": "1", "markers": [{"name": "tick", "position": "1/4"}]},
             "attack": {"kind": "contour", "start": "event", "segments": [{"duration": "1/2 s", "to": 1}]},
             "level": {"kind": "affine", "input": "attack", "scale": 0.5, "offset": 0.5}
           },
@@ -71,7 +71,7 @@
         "body": {
           "kind": "patch",
           "envelfos": {
-            "clock": {"kind": "cycle", "shape": "triangle", "rate": "1"},
+            "clock": {"kind": "lfo", "shape": "triangle", "rate": "1"},
             "edge": {"kind": "threshold", "input": "clock", "lower": -0.25, "upper": 0.25},
             "attack": {"kind": "contour", "start": "event", "segments": [{"duration": "1/2 s", "to": 1}]}
           },

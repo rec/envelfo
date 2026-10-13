@@ -1,4 +1,4 @@
-//! Exact Cycle position/command state and floating-point signal observations.
+//! Exact LFO position/command state and floating-point signal observations.
 
 use std::f64::consts::TAU;
 
@@ -33,7 +33,7 @@ pub enum Driver {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct Cycle {
+pub struct LFO {
     pub shape: Shape,
     pub rate: Time,
     pub phase: Time,
@@ -47,9 +47,9 @@ pub struct Cycle {
     pub driver: Driver,
 }
 
-impl Cycle {
+impl LFO {
     pub fn new(rate: Time) -> Result<Self, Error> {
-        let cycle = Self {
+        let lfo = Self {
             shape: Shape::Sine,
             rate,
             phase: Time::ZERO,
@@ -62,8 +62,8 @@ impl Cycle {
             clock: Clock::Seconds,
             driver: Driver::Elapsed,
         };
-        cycle.validate()?;
-        Ok(cycle)
+        lfo.validate()?;
+        Ok(lfo)
     }
     pub fn validate(&self) -> Result<(), Error> {
         if self.rate < Time::ZERO
@@ -80,7 +80,7 @@ impl Cycle {
             || self.center + self.depth > 1.0
         {
             return Err(Error::InvalidDefinition(
-                "invalid Cycle range, phase, rate or activation",
+                "invalid LFO range, phase, rate or activation",
             ));
         }
         if self.driver == Driver::Transport
@@ -90,21 +90,21 @@ impl Cycle {
                 || self.fade != Time::ZERO)
         {
             return Err(Error::InvalidDefinition(
-                "transport-position Cycle requires beat clock, transport reset and no delay/fade",
+                "transport-position LFO requires beat clock, transport reset and no delay/fade",
             ));
         }
         Ok(())
     }
 
-    pub fn initial(&self, at: Time) -> Result<CycleState, Error> {
+    pub fn initial(&self, at: Time) -> Result<LFOState, Error> {
         self.validate()?;
-        Ok(CycleState {
+        Ok(LFOState {
             ordinal: None,
             position: Position::new(at, self.phase, self.rate),
         })
     }
 
-    pub fn value(&self, state: &CycleState, at: Time) -> Result<Value, Error> {
+    pub fn value(&self, state: &LFOState, at: Time) -> Result<Value, Error> {
         self.validate()?;
         let (coordinate, weight) = if self.driver == Driver::Transport {
             (self.phase.checked_add(self.rate.checked_mul(at)?)?, 1.0)
@@ -173,7 +173,7 @@ impl Cycle {
     /// Errors leave state untouched, including overflow while advancing position.
     pub fn command(
         &self,
-        state: &mut CycleState,
+        state: &mut LFOState,
         at: Time,
         ordinal: u64,
         command: Command,
@@ -181,7 +181,7 @@ impl Cycle {
         self.validate()?;
         if self.driver == Driver::Transport {
             return Err(Error::Unsupported(
-                "transport-position Cycle does not accept phase commands",
+                "transport-position LFO does not accept phase commands",
             ));
         }
         check_order(state.position.at, state.ordinal, at, ordinal)?;
@@ -207,7 +207,7 @@ impl Cycle {
             }
             Command::NoteOn | Command::NoteOff | Command::Transport => {}
         }
-        *state = CycleState {
+        *state = LFOState {
             position: next,
             ordinal: Some(ordinal),
         };
@@ -222,7 +222,7 @@ pub enum Direction {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct CycleState {
+pub struct LFOState {
     pub(crate) ordinal: Option<u64>,
     pub(crate) position: Position,
 }

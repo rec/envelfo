@@ -15,7 +15,7 @@ def clock_patch(
 ) -> envelfo.EnvelfoUse:
     children: dict[str, object] = {
         'clock': {
-            'kind': 'cycle',
+            'kind': 'lfo',
             'shape': 'triangle',
             'rate': '1',
             'markers': [{'name': 'tick', 'position': '1/4'}],
@@ -186,7 +186,7 @@ def test_slew_uses_host_seconds_even_when_local_beats_are_stopped() -> None:
             'body': {
                 'kind': 'patch',
                 'envelfos': {
-                    'constant': {'kind': 'cycle', 'rate': '0', 'center': 1, 'depth': 0},
+                    'constant': {'kind': 'lfo', 'rate': '0', 'center': 1, 'depth': 0},
                     'slew': {
                         'kind': 'slew',
                         'input': 'constant',
@@ -266,7 +266,7 @@ def test_invalid_host_schedule_and_unmaterialized_patch_are_rejected() -> None:
         )
     with pytest.raises(ValueError, match='materialized Patch'):
         patch.initial_patch(
-            envelfo.EnvelfoUse(body=envelfo.Cycle(rate=Fraction(1))), Fraction(0)
+            envelfo.EnvelfoUse(body=envelfo.LFO(rate=Fraction(1))), Fraction(0)
         )
 
 

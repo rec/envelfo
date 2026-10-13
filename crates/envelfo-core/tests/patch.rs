@@ -1,6 +1,6 @@
 use envelfo_core::Error;
 use envelfo_core::contour::{Contour, Segment, Start};
-use envelfo_core::cycle::{Command, Cycle, Shape};
+use envelfo_core::lfo::{Command, LFO, Shape};
 use envelfo_core::patch::{
     Child, ChildCommand, ChildEvent, ClockMapping, Connection, ConnectionAction, EventOutput, Node,
     Output, Patch, Port, Seconds,
@@ -167,7 +167,7 @@ fn threshold_edges_wait_for_host_delivery_and_then_seconds_delay() {
 }
 
 #[test]
-fn external_seek_commands_do_not_add_observations_or_replay_cycle_markers() {
+fn external_seek_commands_do_not_add_observations_or_replay_lfo_markers() {
     let body = clock_patch(ConnectionAction::Sample);
     let mut state = body.initial(Time::ZERO, "patch", 0, &Seconds).unwrap();
     assert!(
@@ -247,11 +247,11 @@ fn slew_uses_seconds_while_transport_is_stopped_and_cues_keep_host_timestamps() 
         children: vec![
             child(
                 "constant",
-                Node::Cycle {
-                    body: Cycle {
+                Node::LFO {
+                    body: LFO {
                         center: 1.0,
                         depth: 0.0,
-                        ..Cycle::new(Time::ZERO).unwrap()
+                        ..LFO::new(Time::ZERO).unwrap()
                     },
                     markers: vec![],
                 },
@@ -434,7 +434,7 @@ fn host_clock_failure_rolls_back_deliveries_and_random_draws() {
 }
 
 #[test]
-fn cycle_pause_reverse_and_rate_commands_retime_markers_exactly() {
+fn lfo_pause_reverse_and_rate_commands_retime_markers_exactly() {
     let body = clock_patch(ConnectionAction::Sample);
     let mut state = body.initial(Time::ZERO, "patch", 0, &Seconds).unwrap();
     body.command(
@@ -543,7 +543,7 @@ fn invalid_schedules_commands_overflow_and_capacity_leave_snapshot_unchanged() {
 }
 
 #[test]
-fn normalized_graphs_reject_cycles_unknown_ports_invalid_targets_and_nonfinite_ranges() {
+fn normalized_graphs_reject_lfos_unknown_ports_invalid_targets_and_nonfinite_ranges() {
     let mut body = clock_patch(ConnectionAction::Sample);
     body.children
         .push(child("self", Node::Signal(Operator::Latch("self".into()))));
@@ -614,8 +614,8 @@ fn observe(
         .unwrap()
 }
 fn clock_patch(action: ConnectionAction) -> Patch {
-    let mut cycle = Cycle::new(Time::ONE).unwrap();
-    cycle.shape = Shape::Triangle;
+    let mut lfo = LFO::new(Time::ONE).unwrap();
+    lfo.shape = Shape::Triangle;
     let held = if action == ConnectionAction::Start {
         Node::Contour(attack())
     } else {
@@ -628,8 +628,8 @@ fn clock_patch(action: ConnectionAction) -> Patch {
         children: vec![
             child(
                 "clock",
-                Node::Cycle {
-                    body: cycle,
+                Node::LFO {
+                    body: lfo,
                     markers: vec![envelfo_core::contour::Marker {
                         name: "tick".into(),
                         position: t(1, 4),

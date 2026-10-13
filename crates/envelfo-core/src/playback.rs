@@ -1,7 +1,7 @@
 //! Shared checked position state; body-specific lifecycle remains with its body.
 
 use crate::Error;
-use crate::cycle::{Command, Direction};
+use crate::lfo::{Command, Direction};
 use crate::time::Time;
 
 #[derive(Clone, Debug, Eq, PartialEq)]

@@ -5,9 +5,15 @@ composition and events. Extraction from uFor and enge is in progress.
 
 uFor owns the portable definitions. enveLFO owns their execution. The Python
 library requires neither NumPy nor an audio engine. The Rust core now
-supports exact Cycle, Contour, Stages and Patch execution, including signal
+supports exact LFO, Contour, Stages and Patch execution, including signal
 operators, connection scheduling and portable random streams. Consumer adapter
 integration is still in progress.
+
+The periodic Envelfo body is `LFO`, with discriminator `kind = "lfo"` and state
+type `LFOState`. This replaces `Cycle` without compatibility aliases. Rust uses
+`envelfo_core::lfo`. The `cycle` event port still names a completed loop traversal;
+it is not a body type. Oscillator duty cycles and graph dependency cycles also
+keep their existing meaning.
 
 ## Python
 
@@ -19,9 +25,9 @@ audio-device, or compiled-extension dependency.
 from fractions import Fraction
 
 from envelfo.runtime import envelfo_at, initial_envelfo
-from ufor.envelfo import Cycle, EnvelfoUse
+from ufor.envelfo import LFO, EnvelfoUse
 
-definition = EnvelfoUse(body=Cycle(rate=Fraction(1)))
+definition = EnvelfoUse(body=LFO(rate=Fraction(1)))
 state = initial_envelfo(definition, Fraction(0))
 value = envelfo_at(definition, state, Fraction(1, 4))
 assert value.value == 1.0
@@ -29,7 +35,7 @@ assert value.value == 1.0
 
 Execution functions live in `envelfo.runtime`; authored definitions, typed
 commands, values, and snapshot records remain in `ufor.envelfo`. Use
-`envelfo_event` for timestamped Cycle/Contour/SampleHold commands and
+`envelfo_event` for timestamped LFO/Contour/SampleHold commands and
 `advance_envelfo` for Stages, retaining its returned state and ordered events.
 `next_stage_event` exposes the next natural staged boundary. Snapshot records
 support Pydantic JSON serialization and restoration without native bindings.
@@ -55,7 +61,7 @@ from ufor.envelfo import Affine, Patch
 definition = EnvelfoUse(
     body=Patch(
         envelfos={
-            'wave': Cycle(rate=Fraction(1)),
+            'wave': LFO(rate=Fraction(1)),
             'level': Affine(input='wave', scale=0.5, offset=0.5),
         },
         outputs={'expression': 'level'},
@@ -114,12 +120,12 @@ also check optimized overflow behavior with `cargo test --workspace --release`.
 `cargo clippy --workspace --all-targets -- -D warnings` checks the Rust source.
 The tested API example lives in the crate's documentation.
 
-`Cycle::new(rate)` uses the existing Cycle defaults. Pass exact positions in
-the Cycle's declared seconds/beat clock; a transport-position Cycle receives
+`LFO::new(rate)` uses the existing LFO defaults. Pass exact positions in
+the LFO's declared seconds/beat clock; a transport-position LFO receives
 song beats directly. Hosts normalize authored quantities and supply clocks.
 The core does not parse Pint quantities, acquire tempo or interpret frame counts.
 Commands preserve phase, activation age, pause/reverse and reset behavior;
-failed commands leave the supplied state untouched. `CycleState::clone` provides
+failed commands leave the supplied state untouched. `LFOState::clone` provides
 continuation snapshots. A serialized Rust snapshot format is not provided yet.
 
 `Time` holds a reduced signed i64 numerator and positive i64 denominator. It
@@ -147,7 +153,7 @@ scalar value plus ordered output events. `Stages::value` only observes state;
 it does not run transitions. `Stages::next_event` inspects the next boundary
 without advancing. Commands at a boundary preempt obsolete natural completion;
 markers precede loop boundaries, and finite repeats emit the boundary then
-`stage.done`. A finish transition emits `done`. Cycle markers are stored on their
+`stage.done`. A finish transition emits `done`. LFO markers are stored on their
 Stage; Contour markers are part of the Contour definition. Contour/Stage states
 can be cloned for continuation, and failed advances leave the supplied state
 unchanged. One advance is limited to 4096 emitted events, with an explicit
@@ -159,7 +165,7 @@ again after changing a definition.
 dependencies, event ports, output names, action targets and finite signal ranges.
 Child, connection and event-output vectors preserve declaration order. Signal
 ordering matches Python's first-encountered dependency order. Nodes include
-Cycles with markers, Contours, Stages, SampleHold, and Sum/Product/Affine/Quantize/
+LFOs with markers, Contours, Stages, SampleHold, and Sum/Product/Affine/Quantize/
 Latch/Threshold/Slew operators. Signals remain dimensionless and are not clipped.
 
 `Patch::advance(state, at, next_delivery, clock)` processes exact natural events

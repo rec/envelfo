@@ -1,6 +1,6 @@
 //! Event-sampled random controls with a portable, independently owned stream.
 
-use crate::cycle::{Command, Value};
+use crate::lfo::{Command, Value};
 use crate::playback::check_order;
 use crate::random::random_word;
 use crate::time::Time;

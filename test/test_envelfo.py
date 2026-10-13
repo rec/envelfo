@@ -4,9 +4,9 @@ import pytest
 from pydantic import ValidationError
 from ufor.codec import parse_score, score_toml
 from ufor.envelfo import (
+    LFO,
     Affine,
     Contour,
-    Cycle,
     EnterStage,
     EnvelfoEvent,
     EnvelfoScore,
@@ -55,7 +55,7 @@ def staged_envelfo() -> EnvelfoUse:
                 ),
                 Stage(
                     name='sway',
-                    envelfo=Cycle(
+                    envelfo=LFO(
                         rate=Fraction(2),
                         center=0.7,
                         depth=0.2,
@@ -101,15 +101,15 @@ def staged_envelfo() -> EnvelfoUse:
     )
 
 
-@pytest.mark.parametrize('kind', ['hold', 'cycle', 'contour'])
+@pytest.mark.parametrize('kind', ['hold', 'lfo', 'contour'])
 def test_next_stage_boundary_query_is_exact_and_does_not_advance_state(
     kind: str,
 ) -> None:
     child = (
         Hold(value=0.5)
         if kind == 'hold'
-        else Cycle(rate=2, markers=[Marker(name='pulse', position=Fraction(1, 2))])
-        if kind == 'cycle'
+        else LFO(rate=2, markers=[Marker(name='pulse', position=Fraction(1, 2))])
+        if kind == 'lfo'
         else Contour(segments=[Segment(duration=Fraction(1, 4), to=1)])
     )
     body = Stages(initial_stage='source', stages=[Stage(name='source', envelfo=child)])
@@ -122,21 +122,21 @@ def test_next_stage_boundary_query_is_exact_and_does_not_advance_state(
     if kind == 'hold':
         assert boundary is None
     else:
-        assert boundary == (Fraction(1, 4), 0, 'pulse' if kind == 'cycle' else 'done')
+        assert boundary == (Fraction(1, 4), 0, 'pulse' if kind == 'lfo' else 'done')
         assert next_stage_event(body, state.runtime, Fraction(1, 4), False) is None
         result = advance_envelfo(envelfo, state, Fraction(1, 4))
         assert result.events[0].at == boundary[0]
-        assert result.events[0].port == ('pulse' if kind == 'cycle' else 'stage.done')
+        assert result.events[0].port == ('pulse' if kind == 'lfo' else 'stage.done')
     assert state.model_dump_json() == saved
 
 
-def test_transport_position_cycle_follows_song_beats_across_seek() -> None:
+def test_transport_position_lfo_follows_song_beats_across_seek() -> None:
     envelfo = EnvelfoUse.model_validate(
         {
             'clock': 'beats',
             'position_driver': 'transport',
             'body': {
-                'kind': 'cycle',
+                'kind': 'lfo',
                 'shape': 'triangle',
                 'rate': '1/4',
                 'reset': 'transport',
@@ -157,7 +157,7 @@ def test_transport_position_cycle_follows_song_beats_across_seek() -> None:
             {
                 'clock': 'beats',
                 'position_driver': 'transport',
-                'body': {'kind': 'cycle', 'rate': '1'},
+                'body': {'kind': 'lfo', 'rate': '1'},
             }
         )
     reference = EnvelfoUse.model_validate(
@@ -170,7 +170,7 @@ def test_transport_position_cycle_follows_song_beats_across_seek() -> None:
     score = EnvelfoScore(
         name='pulse',
         title='Pulse',
-        body=Cycle(rate=Fraction(1, 4), reset='transport'),
+        body=LFO(rate=Fraction(1, 4), reset='transport'),
     )
     resolved = instantiate_envelfo(
         score, clock=reference.clock, position_driver=reference.position_driver
@@ -227,7 +227,7 @@ def test_patch_transforms_follow_dependencies_without_clipping() -> None:
             'output': Affine(input='combined', scale=-0.5, offset=0.25),
             'combined': Sum(inputs=['shaped', 'carrier']),
             'shaped': Product(inputs=['carrier', 'envelope']),
-            'carrier': Cycle(rate=1),
+            'carrier': LFO(rate=1),
             'envelope': Contour(segments=[Segment(duration=1, to=1)]),
         },
         outputs={'signal': 'output'},
@@ -247,7 +247,7 @@ def test_patch_marker_can_start_waiting_contour() -> None:
         'kind': 'patch',
         'envelfos': {
             'clock': {
-                'kind': 'cycle',
+                'kind': 'lfo',
                 'rate': '2',
                 'markers': [{'name': 'peak', 'position': '1/4'}],
             },
@@ -364,8 +364,8 @@ def test_triggered_contour_holds_then_releases_from_current_value() -> None:
     assert envelfo_at(envelfo, state, Fraction(5, 2)).status == 'complete'
 
 
-def test_cycle_uses_same_value_and_event_contract() -> None:
-    envelfo = EnvelfoUse(body=Cycle(rate=Fraction(1)))
+def test_lfo_uses_same_value_and_event_contract() -> None:
+    envelfo = EnvelfoUse(body=LFO(rate=Fraction(1)))
     state = initial_envelfo(envelfo, Fraction(0))
     state = envelfo_event(
         envelfo,
@@ -384,8 +384,8 @@ def test_cycle_uses_same_value_and_event_contract() -> None:
     )
 
 
-def test_cycle_pause_reverse_and_seek_preserve_seconds_position() -> None:
-    envelfo = EnvelfoUse(body=Cycle(rate=Fraction(1), delay=Fraction(1, 4)))
+def test_lfo_pause_reverse_and_seek_preserve_seconds_position() -> None:
+    envelfo = EnvelfoUse(body=LFO(rate=Fraction(1), delay=Fraction(1, 4)))
     state = initial_envelfo(envelfo, Fraction(0))
     state = envelfo_event(
         envelfo, state, EnvelfoEvent(at=Fraction(1, 4), ordinal=0, action='pause')
@@ -413,11 +413,11 @@ def test_cycle_pause_reverse_and_seek_preserve_seconds_position() -> None:
     )
 
 
-def test_relative_shift_wraps_cycles_and_clamps_contours() -> None:
-    cycle = EnvelfoUse(body=Cycle(rate=Fraction(1)))
-    cycle_state = envelfo_event(
-        cycle,
-        initial_envelfo(cycle, Fraction(0)),
+def test_relative_shift_wraps_lfos_and_clamps_contours() -> None:
+    lfo = EnvelfoUse(body=LFO(rate=Fraction(1)))
+    lfo_state = envelfo_event(
+        lfo,
+        initial_envelfo(lfo, Fraction(0)),
         EnvelfoEvent(
             at=Fraction(1, 4),
             ordinal=0,
@@ -425,7 +425,7 @@ def test_relative_shift_wraps_cycles_and_clamps_contours() -> None:
             offset=Fraction(-1, 2),
         ),
     )
-    assert envelfo_at(cycle, cycle_state, Fraction(1, 4)).value == pytest.approx(-1)
+    assert envelfo_at(lfo, lfo_state, Fraction(1, 4)).value == pytest.approx(-1)
 
     contour = EnvelfoUse(body=Contour(segments=[Segment(duration=Fraction(1), to=1)]))
     state = envelfo_event(

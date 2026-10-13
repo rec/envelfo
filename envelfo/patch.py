@@ -114,7 +114,7 @@ def initial_patch(
         )
         for n, b in body.envelfos.items()
         if isinstance(
-            b, (envelfo.Cycle, envelfo.Contour, envelfo.Stages, envelfo.SampleHold)
+            b, (envelfo.LFO, envelfo.Contour, envelfo.Stages, envelfo.SampleHold)
         )
     }
     return PatchState(at=at, name=name, seed=seed, children=children)
@@ -196,7 +196,7 @@ def _body(definition: envelfo.EnvelfoUse) -> envelfo.Patch:
 def _child(definition: envelfo.EnvelfoUse, name: str) -> envelfo.EnvelfoUse:
     body = _body(definition).envelfos[name]
     if not isinstance(
-        body, (envelfo.Cycle, envelfo.Contour, envelfo.Stages, envelfo.SampleHold)
+        body, (envelfo.LFO, envelfo.Contour, envelfo.Stages, envelfo.SampleHold)
     ):
         raise ValueError('commands require an executable Patch child')
     return envelfo.EnvelfoUse(
@@ -329,7 +329,7 @@ def _run(
         candidates: list[Fraction] = [
             e.at for e in state.pending if e.at <= limit if inclusive or e.at < limit
         ]
-        cycles: list[tuple[Fraction, str, str]] = []
+        lfos: list[tuple[Fraction, str, str]] = []
         clock_limit = _clock(definition, limit, tempo_map)
         for name, current in state.children.items():
             body = _body(definition).envelfos[name]
@@ -342,8 +342,8 @@ def _run(
                     seconds = _seconds(definition, boundary[0], tempo_map)
                     if seconds >= state.at:
                         candidates.append(seconds)
-            elif isinstance(body, envelfo.Cycle) and body.markers:
-                assert isinstance(current.runtime, envelfo.CycleState)
+            elif isinstance(body, envelfo.LFO) and body.markers:
+                assert isinstance(current.runtime, envelfo.LFOState)
                 position = current.runtime.position
                 if position.paused or not position.rate:
                     continue
@@ -363,7 +363,7 @@ def _run(
                     ) / (position.direction * position.rate)
                     seconds = _seconds(definition, clock, tempo_map)
                     if seconds <= limit and (inclusive or seconds < limit):
-                        cycles.append((seconds, name, marker.name))
+                        lfos.append((seconds, name, marker.name))
                         candidates.append(seconds)
         if not candidates:
             break
@@ -379,7 +379,7 @@ def _run(
                 processed += len(result.events)
                 for event in result.events:
                     emitted.extend(_route(definition, state, name, event, seconds))
-        for at, name, port in cycles:
+        for at, name, port in lfos:
             if at == seconds:
                 processed += 1
                 emitted.extend(

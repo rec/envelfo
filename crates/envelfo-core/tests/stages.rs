@@ -1,5 +1,5 @@
 use envelfo_core::contour::{Contour, Initial, Marker, Playback, Segment};
-use envelfo_core::cycle::{Command, Cycle, Shape};
+use envelfo_core::lfo::{Command, LFO, Shape};
 use envelfo_core::stages::{Action, Body, Event, Stage, StageCommand, Stages, Transition};
 use envelfo_core::time::Time;
 use envelfo_core::{Error, Status};
@@ -133,13 +133,13 @@ fn cue_reenters_with_current_level_and_preserves_pause() {
 }
 
 #[test]
-fn stage_cycle_fade_saturates_without_unnecessary_rational_overflow() {
-    let mut cycle = Cycle::new(Time::ZERO).unwrap();
-    cycle.shape = Shape::Square;
-    cycle.fade = t(1, i64::MAX);
+fn stage_lfo_fade_saturates_without_unnecessary_rational_overflow() {
+    let mut lfo = LFO::new(Time::ZERO).unwrap();
+    lfo.shape = Shape::Square;
+    lfo.fade = t(1, i64::MAX);
     let body = Stages {
         initial_stage: "wave".into(),
-        stages: vec![stage("wave", Body::Cycle(cycle))],
+        stages: vec![stage("wave", Body::LFO(lfo))],
         transitions: vec![],
     };
     let state = body.initial(Time::ZERO).unwrap();

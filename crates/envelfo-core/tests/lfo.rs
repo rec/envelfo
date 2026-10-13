@@ -1,10 +1,10 @@
 use envelfo_core::Error;
-use envelfo_core::cycle::{Clock, Command, Cycle, Driver, Reset, Shape};
+use envelfo_core::lfo::{Clock, Command, Driver, LFO, Reset, Shape};
 use envelfo_core::time::Time;
 
 #[test]
 fn reverse_seek_shift_and_clone_preserve_exact_position() {
-    let mut definition = Cycle::new(Time::ONE).unwrap();
+    let mut definition = LFO::new(Time::ONE).unwrap();
     definition.shape = Shape::Triangle;
     let mut state = definition.initial(Time::ZERO).unwrap();
     definition
@@ -52,7 +52,7 @@ fn reverse_seek_shift_and_clone_preserve_exact_position() {
 
 #[test]
 fn failed_commands_leave_the_complete_snapshot_unchanged() {
-    let mut definition = Cycle::new(Time::from_integer(i64::MAX)).unwrap();
+    let mut definition = LFO::new(Time::from_integer(i64::MAX)).unwrap();
     let mut state = definition.initial(Time::ZERO).unwrap();
     let before = state.clone();
     assert_eq!(
@@ -89,7 +89,7 @@ fn failed_commands_leave_the_complete_snapshot_unchanged() {
 
 #[test]
 fn pause_freezes_activation_age_and_reset_restarts_it() {
-    let mut definition = Cycle::new(Time::ONE).unwrap();
+    let mut definition = LFO::new(Time::ONE).unwrap();
     definition.shape = Shape::Square;
     definition.fade = Time::ONE;
     let mut state = definition.initial(Time::ZERO).unwrap();
@@ -127,7 +127,7 @@ fn pause_freezes_activation_age_and_reset_restarts_it() {
 
 #[test]
 fn waveform_decisions_remain_exact_near_i64_limits() {
-    let mut definition = Cycle::new(Time::ZERO).unwrap();
+    let mut definition = LFO::new(Time::ZERO).unwrap();
     definition.phase = Time::new(i64::MAX - 1, i64::MAX).unwrap();
     definition.duty = definition.phase;
     let state = definition.initial(Time::ZERO).unwrap();
@@ -157,7 +157,7 @@ fn waveform_decisions_remain_exact_near_i64_limits() {
 fn reset_policies_match_trigger_transport_and_free_playback() {
     for reset in [Reset::Trigger, Reset::Transport, Reset::Free] {
         for command in [Command::NoteOn, Command::NoteOff, Command::Transport] {
-            let mut definition = Cycle::new(Time::ONE).unwrap();
+            let mut definition = LFO::new(Time::ONE).unwrap();
             definition.shape = Shape::Triangle;
             definition.reset = reset;
             let mut state = definition.initial(Time::ZERO).unwrap();
@@ -179,7 +179,7 @@ fn reset_policies_match_trigger_transport_and_free_playback() {
 
 #[test]
 fn transport_driver_validates_its_clock_and_rejects_state_commands() {
-    let mut definition = Cycle::new(Time::ONE).unwrap();
+    let mut definition = LFO::new(Time::ONE).unwrap();
     definition.driver = Driver::Transport;
     assert!(definition.initial(Time::ZERO).is_err());
     definition.clock = Clock::Beats;
@@ -198,7 +198,7 @@ fn transport_driver_validates_its_clock_and_rejects_state_commands() {
 
 #[test]
 fn saturated_fade_does_not_overflow_signal_only_arithmetic() {
-    let mut definition = Cycle::new(Time::ZERO).unwrap();
+    let mut definition = LFO::new(Time::ZERO).unwrap();
     definition.fade = Time::new(1, i64::MAX).unwrap();
     let state = definition.initial(Time::ZERO).unwrap();
     assert_eq!(
