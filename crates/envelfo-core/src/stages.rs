@@ -1,7 +1,8 @@
 //! Exact natural boundaries, transitions and externally commanded Stage playback.
 
 use crate::envelope::{
-    Envelope, Initial, Marker, Playback, Start, curve_at, duration, rate, validate_markers,
+    Envelope, Initial, Marker, Playback, Start, advance_segment, curve_at, duration, rate,
+    segment_value, validate_markers,
 };
 use crate::lfo::{Command, Direction, Driver, LFO, Value};
 use crate::playback::{Position, check_order};
@@ -10,7 +11,6 @@ use crate::{Error, Status};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Body {
-    Hold(f64),
     LFO(LFO),
     Envelope(Envelope),
 }
@@ -46,6 +46,7 @@ pub struct Stages {
 pub enum StageCommand {
     Playback(Command),
     Cue(String),
+    Advance,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -81,6 +82,8 @@ pub struct StageState {
     completed: bool,
     complete_value: Option<f64>,
     traversals: u64,
+    segment_index: usize,
+    stage_done: bool,
 }
 
 impl StageState {
@@ -103,13 +106,6 @@ impl Stages {
                 return Err(Error::InvalidDefinition("invalid or duplicate Stage name"));
             }
             match &stage.body {
-                Body::Hold(v) if !v.is_finite() || !(-1.0..=1.0).contains(v) => {
-                    return Err(Error::InvalidDefinition("invalid Hold level"));
-                }
-                Body::Hold(_) if !stage.markers.is_empty() => {
-                    return Err(Error::InvalidDefinition("Hold cannot have markers"));
-                }
-                Body::Hold(_) => {}
                 Body::LFO(c) => {
                     c.validate()?;
                     if c.driver != Driver::Elapsed {
@@ -124,7 +120,7 @@ impl Stages {
                     if !stage.markers.is_empty()
                         || !c.release.is_empty()
                         || c.start == Start::Event
-                        || duration(&c.segments)? == Time::ZERO
+                        || (!c.indefinite() && duration(&c.segments)? == Time::ZERO)
                         || (index == initial && c.initial == Initial::Current)
                     {
                         return Err(Error::InvalidDefinition(
@@ -190,6 +186,8 @@ impl Stages {
             completed: false,
             complete_value: None,
             traversals: 0,
+            segment_index: 0,
+            stage_done: false,
         })
     }
 
@@ -210,13 +208,24 @@ impl Stages {
         }
         let position = state.position.advanced(at)?;
         match &self.stages[state.stage].body {
-            Body::Hold(value) => Ok(Value {
-                value: *value,
-                weight: 1.0,
-                status: Status::Held,
-            }),
             Body::LFO(c) => c.staged_value(&position),
             Body::Envelope(c) => {
+                if c.indefinite() {
+                    let (value, status, _) = segment_value(
+                        state.entry_value,
+                        &c.segments[state.segment_index..],
+                        position.coordinate,
+                    )?;
+                    return Ok(Value {
+                        value,
+                        weight: 1.0,
+                        status: if status == Status::Complete {
+                            Status::Held
+                        } else {
+                            status
+                        },
+                    });
+                }
                 let complete = c.repeat_count.is_some_and(|n| state.traversals >= n);
                 let coordinate = if complete {
                     c.boundary_coordinate(position.coordinate, position.direction)?
@@ -274,10 +283,12 @@ impl Stages {
                     | Command::Shift(_)
                     | Command::Rate(_)),
                 ) => {
-                    if matches!(self.stages[next.stage].body, Body::Hold(_))
+                    if matches!(&self.stages[next.stage].body, Body::Envelope(c) if c.indefinite())
                         && matches!(c, Command::Seek(_) | Command::Shift(_))
                     {
-                        return Err(Error::Unsupported("Hold cannot seek or shift"));
+                        return Err(Error::Unsupported(
+                            "indefinite Envelope cannot use normalized positions",
+                        ));
                     }
                     next.position = next.position.advanced(at)?;
                     next.position.command(*c)?;
@@ -288,6 +299,31 @@ impl Stages {
                             next.position.coordinate.clamp(Time::ZERO, Time::ONE);
                     }
                     next.cursor = None;
+                }
+                StageCommand::Advance => {
+                    let Body::Envelope(c) = &self.stages[next.stage].body else {
+                        return Err(Error::Unsupported(
+                            "advance requires an indefinite Envelope",
+                        ));
+                    };
+                    if next.completed || !c.indefinite() {
+                        return Err(Error::Unsupported(
+                            "advance requires an active indefinite segment",
+                        ));
+                    }
+                    next.position = next.position.advanced(at)?;
+                    let (index, value) = advance_segment(
+                        next.entry_value,
+                        &c.segments[next.segment_index..],
+                        next.position.coordinate,
+                    )?;
+                    next.segment_index += index;
+                    next.stage_done = false;
+                    next.entry_value = value;
+                    next.position.coordinate = Time::ZERO;
+                    next.at = at;
+                    next.cursor = None;
+                    self.natural(&mut next, at, true, &mut events)?;
                 }
                 StageCommand::Playback(Command::NoteOn | Command::NoteOff)
                 | StageCommand::Cue(_) => {
@@ -396,6 +432,8 @@ impl Stages {
                     completed: false,
                     complete_value: None,
                     traversals: 0,
+                    segment_index: 0,
+                    stage_done: false,
                 };
             }
         }
@@ -417,6 +455,7 @@ impl Stages {
             }
             state.at = candidate.at;
             state.cursor = Some(candidate.order);
+            state.stage_done |= candidate.port == "done";
             state.position = state.position.advanced(candidate.at)?;
             let mut final_repeat = false;
             let mut final_cycle = false;
@@ -497,10 +536,31 @@ impl Stages {
         if limit < state.at {
             return Err(Error::TimeReversed);
         }
-        if state.completed || state.position.paused || state.position.rate == Time::ZERO {
+        if state.completed {
             return Ok(None);
         }
         let stage = &self.stages[state.stage];
+        if matches!(&stage.body, Body::Envelope(c) if c.indefinite() && !state.stage_done && c.segments[state.segment_index..].iter().all(|s| s.duration == Some(Time::ZERO)))
+        {
+            return Ok(
+                if if inclusive {
+                    state.at <= limit
+                } else {
+                    state.at < limit
+                } {
+                    Some(Candidate {
+                        at: state.at,
+                        order: 0,
+                        port: "done".into(),
+                    })
+                } else {
+                    None
+                },
+            );
+        }
+        if state.position.paused || state.position.rate == Time::ZERO {
+            return Ok(None);
+        }
         let coordinate = state.position.coordinate;
         let forward = state.position.direction == Direction::Forward;
         let mut candidates = vec![];
@@ -537,7 +597,6 @@ impl Stages {
             })
         };
         match &stage.body {
-            Body::Hold(_) => {}
             Body::LFO(_) => {
                 for (order, marker) in stage.markers.iter().enumerate() {
                     let offset = coordinate.checked_sub(marker.position)?;
@@ -551,6 +610,13 @@ impl Stages {
                     if offset.modulo_one() == Time::ZERO {
                         add(coordinate, order, &marker.name, after(order))?;
                     }
+                }
+            }
+            Body::Envelope(c) if c.indefinite() => {
+                let parts = &c.segments[state.segment_index..];
+                if forward && !parts.iter().any(|s| s.duration.is_none()) {
+                    let target = duration(parts)?;
+                    add(target, 0, "done", coordinate == target && !state.stage_done)?;
                 }
             }
             Body::Envelope(c) if c.playback == Playback::Once => {
@@ -697,7 +763,6 @@ fn markers(stage: &Stage) -> &[Marker] {
 
 fn initial_position(body: &Body, at: Time) -> Result<Position, Error> {
     let (coordinate, rate) = match body {
-        Body::Hold(_) => (Time::ZERO, Time::ZERO),
         Body::LFO(c) => (c.phase, c.rate),
         Body::Envelope(c) => (Time::ZERO, rate(&c.segments)?),
     };

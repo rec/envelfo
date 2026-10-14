@@ -7,7 +7,8 @@ use crate::{Error, Status};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Segment {
-    pub duration: Time,
+    /// None holds the incoming value until Advance; to and curve are unused.
+    pub duration: Option<Time>,
     pub to: f64,
     pub curve: f64,
 }
@@ -84,17 +85,23 @@ impl Envelope {
             |v: f64| v.is_finite() && v <= 1.0 && v >= if self.bipolar { -1.0 } else { 0.0 };
         if self.segments.is_empty()
             || matches!(self.initial, Initial::Value(v) if !valid_level(v))
-            || self
-                .segments
-                .iter()
-                .chain(&self.release)
-                .any(|s| s.duration < Time::ZERO || !valid_level(s.to) || !s.curve.is_finite())
+            || self.segments.iter().chain(&self.release).any(|s| {
+                s.duration.is_some_and(|d| d < Time::ZERO)
+                    || !valid_level(s.to)
+                    || !s.curve.is_finite()
+                    || s.duration.is_none() && s.curve != 0.0
+            })
         {
             return Err(Error::InvalidDefinition(
                 "invalid Envelope levels or segments",
             ));
         }
         validate_markers(&self.markers, true)?;
+        if self.indefinite() && (!self.markers.is_empty() || self.playback != Playback::Once) {
+            return Err(Error::InvalidDefinition(
+                "indefinite Envelope cannot use markers or repeated playback",
+            ));
+        }
         if self.repeat_count == Some(0)
             || (self.playback == Playback::Once
                 && (self.repeat_count.is_some() || self.loop_bounds.is_some()))
@@ -128,7 +135,11 @@ impl Envelope {
                 "current initial level requires a Stage entry",
             ));
         };
-        let rate = rate(&self.segments)?;
+        let rate = if self.indefinite() {
+            Time::ONE
+        } else {
+            rate(&self.segments)?
+        };
         Ok(EnvelopeState {
             position: Position::new(
                 at,
@@ -148,6 +159,7 @@ impl Envelope {
             start_value: value,
             traversals: 0,
             complete_coordinate: None,
+            segment_index: 0,
         })
     }
 
@@ -165,6 +177,25 @@ impl Envelope {
             &self.segments
         };
         let position = state.position.advanced(at)?;
+        if self.indefinite() {
+            let (value, mut status, _) = segment_value(
+                state.start_value,
+                &segments[state.segment_index..],
+                position.coordinate.max(Time::ZERO),
+            )?;
+            if status == Status::Complete
+                && state.phase == Phase::On
+                && self.hold
+                && !self.release.is_empty()
+            {
+                status = Status::Held;
+            }
+            return Ok(Value {
+                value,
+                weight: 1.0,
+                status,
+            });
+        }
         let complete = if state.phase == Phase::On {
             state.complete_coordinate.or(self.completion(state, at)?.1)
         } else {
@@ -238,9 +269,14 @@ impl Envelope {
                     };
                     next.traversals = 0;
                     next.complete_coordinate = None;
+                    next.segment_index = 0;
                     next.position.coordinate = Time::ZERO;
                     next.position.age = Time::ZERO;
-                    next.position.rate = rate(&self.segments)?;
+                    next.position.rate = if self.indefinite() {
+                        Time::ONE
+                    } else {
+                        rate(&self.segments)?
+                    };
                 }
             }
             EnvelopeCommand::Playback(Command::NoteOff) => {
@@ -250,12 +286,37 @@ impl Envelope {
                 {
                     next.phase = Phase::Release;
                     next.start_value = observed.value;
+                    next.segment_index = 0;
                     next.position.coordinate = Time::ZERO;
                     next.position.age = Time::ZERO;
-                    next.position.rate = rate(&self.release)?;
+                    next.position.rate = if self.indefinite() {
+                        Time::ONE
+                    } else {
+                        rate(&self.release)?
+                    };
                 }
             }
             EnvelopeCommand::Playback(Command::NoteOn) => {}
+            EnvelopeCommand::Advance => {
+                if next.phase == Phase::Idle || !self.indefinite() {
+                    return Err(Error::Unsupported(
+                        "advance requires an active indefinite segment",
+                    ));
+                }
+                let parts = if next.phase == Phase::Release {
+                    &self.release
+                } else {
+                    &self.segments
+                };
+                let (index, value) = advance_segment(
+                    next.start_value,
+                    &parts[next.segment_index..],
+                    next.position.coordinate,
+                )?;
+                next.segment_index += index;
+                next.start_value = value;
+                next.position.coordinate = Time::ZERO;
+            }
             EnvelopeCommand::Playback(
                 c @ (Command::Pause
                 | Command::Resume
@@ -263,6 +324,11 @@ impl Envelope {
                 | Command::Seek(_)
                 | Command::Shift(_)),
             ) => {
+                if self.indefinite() && matches!(c, Command::Seek(_) | Command::Shift(_)) {
+                    return Err(Error::Unsupported(
+                        "indefinite Envelope cannot use normalized positions",
+                    ));
+                }
                 next.position.command(c)?;
                 if matches!(c, Command::Shift(_))
                     && (next.phase == Phase::Release || self.playback == Playback::Once)
@@ -280,6 +346,13 @@ impl Envelope {
 
     pub(crate) fn bounds(&self) -> (Time, Time) {
         self.loop_bounds.unwrap_or((Time::ZERO, Time::ONE))
+    }
+
+    pub fn indefinite(&self) -> bool {
+        self.segments
+            .iter()
+            .chain(&self.release)
+            .any(|s| s.duration.is_none())
     }
 
     pub(crate) fn coordinate(&self, raw: Time, release: bool) -> Result<Time, Error> {
@@ -396,6 +469,7 @@ impl Envelope {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum EnvelopeCommand {
     Start,
+    Advance,
     Playback(Command),
 }
 
@@ -414,6 +488,7 @@ pub struct EnvelopeState {
     start_value: f64,
     traversals: u64,
     complete_coordinate: Option<Time>,
+    segment_index: usize,
 }
 
 impl EnvelopeState {
@@ -437,12 +512,15 @@ pub(crate) fn validate_markers(markers: &[Marker], include_end: bool) -> Result<
 }
 
 pub(crate) fn duration(segments: &[Segment]) -> Result<Time, Error> {
-    segments
-        .iter()
-        .try_fold(Time::ZERO, |t, s| t.checked_add(s.duration))
+    segments.iter().try_fold(Time::ZERO, |t, s| {
+        t.checked_add(s.duration.unwrap_or(Time::ZERO))
+    })
 }
 
 pub(crate) fn rate(segments: &[Segment]) -> Result<Time, Error> {
+    if segments.iter().any(|s| s.duration.is_none()) {
+        return Ok(Time::ONE);
+    }
     let total = duration(segments)?;
     if total == Time::ZERO {
         Ok(Time::ZERO)
@@ -454,8 +532,11 @@ pub(crate) fn rate(segments: &[Segment]) -> Result<Time, Error> {
 pub(crate) fn curve_at(initial: f64, segments: &[Segment], mut at: Time) -> Result<f64, Error> {
     let mut value = initial;
     for segment in segments {
-        if at < segment.duration {
-            let progress = at.checked_div(segment.duration)?.as_f64();
+        let Some(duration) = segment.duration else {
+            return Ok(value);
+        };
+        if at < duration {
+            let progress = at.checked_div(duration)?.as_f64();
             let curve = segment.curve;
             let progress = if progress == 0.0 || progress == 1.0 || curve == 0.0 {
                 progress
@@ -466,8 +547,46 @@ pub(crate) fn curve_at(initial: f64, segments: &[Segment], mut at: Time) -> Resu
             };
             return Ok(value + (segment.to - value) * progress);
         }
-        at = at.checked_sub(segment.duration)?;
+        at = at.checked_sub(duration)?;
         value = segment.to;
     }
     Ok(value)
+}
+
+pub(crate) fn segment_value(
+    initial: f64,
+    segments: &[Segment],
+    mut at: Time,
+) -> Result<(f64, Status, usize), Error> {
+    let mut value = initial;
+    at = at.max(Time::ZERO);
+    for (index, segment) in segments.iter().enumerate() {
+        let Some(duration) = segment.duration else {
+            return Ok((value, Status::Held, index));
+        };
+        if at < duration {
+            return Ok((
+                curve_at(value, std::slice::from_ref(segment), at)?,
+                Status::Running,
+                index,
+            ));
+        }
+        at = at.checked_sub(duration)?;
+        value = segment.to;
+    }
+    Ok((value, Status::Complete, segments.len()))
+}
+
+pub(crate) fn advance_segment(
+    initial: f64,
+    segments: &[Segment],
+    at: Time,
+) -> Result<(usize, f64), Error> {
+    let (value, status, index) = segment_value(initial, segments, at)?;
+    if status != Status::Held {
+        return Err(Error::Unsupported(
+            "advance requires an active indefinite segment",
+        ));
+    }
+    Ok((index + 1, value))
 }

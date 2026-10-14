@@ -1,5 +1,13 @@
 # enveLFO
 
+Envelope segments may have `duration: null`: they hold the incoming level until
+an explicit `advance` command enters the next segment. There is no destination
+or curve on an indefinite segment. Note-off bypasses attack/sustain waits and
+enters release, which may itself contain waits. JSON snapshots retain the segment
+cursor. In TOML, an empty segment table represents the same wait.
+Normalized seek/shift, markers and looping are unavailable on indefinite
+Envelopes. Stages use these Envelopes in place of the removed Hold generator.
+
 Independent Python and Rust control libraries for envelopes, LFOs, Stages,
 composition and events. Extraction from uFor and enge is in progress.
 

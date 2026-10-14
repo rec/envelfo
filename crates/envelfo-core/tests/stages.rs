@@ -82,7 +82,20 @@ fn finite_ping_pong_emits_turn_then_cycle_then_completion_at_final_crossing() {
 #[test]
 fn finite_repeat_boundary_transition_wins_over_obsolete_completion_transition() {
     let mut body = repeated(Playback::Loop, true, Some(1));
-    body.stages.push(stage("held", Body::Hold(0.5)));
+    body.stages.push(stage(
+        "held",
+        Body::Envelope(
+            Envelope::new(
+                0.5,
+                vec![Segment {
+                    duration: None,
+                    to: 0.0,
+                    curve: 0.0,
+                }],
+            )
+            .unwrap(),
+        ),
+    ));
     body.transitions = vec![
         transition("sweep", "stage.cycle", Action::Enter("held".into())),
         transition("sweep", "stage.done", Action::Finish),
@@ -196,7 +209,7 @@ fn capacity_overflow_and_invalid_commands_roll_back_the_whole_advance() {
     assert_eq!(state, saved);
     let mut body = repeated(Playback::Once, false, None);
     if let Body::Envelope(c) = &mut body.stages[0].body {
-        c.segments[0].duration = t(1, 2);
+        c.segments[0].duration = Some(t(1, 2));
     }
     let mut state = body.initial(Time::ZERO).unwrap();
     let saved = state.clone();
@@ -262,7 +275,20 @@ fn stage_definitions_reject_unknown_transitions_and_reserved_markers() {
     assert!(body.initial(Time::ZERO).is_err());
     let body = Stages {
         initial_stage: "held".into(),
-        stages: vec![stage("held", Body::Hold(0.25))],
+        stages: vec![stage(
+            "held",
+            Body::Envelope(
+                Envelope::new(
+                    0.25,
+                    vec![Segment {
+                        duration: None,
+                        to: 0.0,
+                        curve: 0.0,
+                    }],
+                )
+                .unwrap(),
+            ),
+        )],
         transitions: vec![],
     };
     let mut state = body.initial(Time::ZERO).unwrap();
@@ -327,7 +353,7 @@ fn ramp() -> Envelope {
     Envelope::new(
         0.0,
         vec![Segment {
-            duration: Time::ONE,
+            duration: Some(Time::ONE),
             to: 1.0,
             curve: 0.0,
         }],

@@ -76,7 +76,7 @@ fn zero_length_segments_apply_immediately_and_curves_stay_finite() {
             vec![
                 segment(Time::ZERO, 0.25),
                 Segment {
-                    duration: Time::ONE,
+                    duration: Some(Time::ONE),
                     to: 1.0,
                     curve,
                 },
@@ -246,7 +246,7 @@ fn invalid_commands_and_time_overflow_leave_snapshot_unchanged() {
     );
     assert_eq!(state, saved);
     let mut body = ramp();
-    body.segments[0].duration = t(1, 2);
+    body.segments[0].duration = Some(t(1, 2));
     let mut state = body.initial(Time::ZERO).unwrap();
     let saved = state.clone();
     assert_eq!(
@@ -281,7 +281,7 @@ fn ramp() -> Envelope {
 }
 fn segment(duration: Time, to: f64) -> Segment {
     Segment {
-        duration,
+        duration: Some(duration),
         to,
         curve: 0.0,
     }

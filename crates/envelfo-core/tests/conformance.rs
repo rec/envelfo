@@ -87,7 +87,11 @@ fn envelopes_and_stages_match_every_shared_trace() {
                                 &mut state,
                                 at,
                                 event["ordinal"].as_u64().unwrap(),
-                                EnvelopeCommand::Playback(command(event)),
+                                if event["action"] == "advance" {
+                                    EnvelopeCommand::Advance
+                                } else {
+                                    EnvelopeCommand::Playback(command(event))
+                                },
                             )
                             .unwrap();
                     }
@@ -114,7 +118,11 @@ fn envelopes_and_stages_match_every_shared_trace() {
                         Some(Event {
                             at: rational(&event["at"]),
                             ordinal: event["ordinal"].as_u64().unwrap(),
-                            command: StageCommand::Playback(command(event)),
+                            command: if event["action"] == "advance" {
+                                StageCommand::Advance
+                            } else {
+                                StageCommand::Playback(command(event))
+                            },
                         })
                     };
                     let advance = stages.advance(&mut state, at, event.as_ref()).unwrap();
@@ -358,12 +366,8 @@ fn envelope(body: &Value) -> Envelope {
                     .map(|s| Segment {
                         duration: s["duration"]
                             .as_str()
-                            .unwrap()
-                            .strip_suffix(" s")
-                            .unwrap()
-                            .parse()
-                            .unwrap(),
-                        to: s["to"].as_f64().unwrap(),
+                            .map(|v| v.strip_suffix(" s").unwrap().parse().unwrap()),
+                        to: s["to"].as_f64().unwrap_or(0.0),
                         curve: s["curve"].as_f64().unwrap_or(0.0),
                     })
                     .collect()
@@ -425,7 +429,6 @@ fn stages(body: &Value) -> Stages {
                         vec![]
                     },
                     body: match body["kind"].as_str().unwrap() {
-                        "hold" => Body::Hold(body["value"].as_f64().unwrap()),
                         "lfo" => Body::LFO(lfo(body)),
                         "envelope" => Body::Envelope(envelope(body)),
                         _ => panic!("unsupported stage"),

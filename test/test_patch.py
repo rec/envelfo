@@ -282,7 +282,15 @@ def staged_patch(clock: str = 'seconds') -> envelfo.EnveLFO:
                                 'segments': [{'duration': f'1/2 {unit}', 'to': 1}],
                             },
                         },
-                        {'name': 'off', 'envelfo': {'kind': 'hold', 'value': 0}},
+                        {
+                            'name': 'off',
+                            'envelfo': {
+                                'kind': 'envelope',
+                                'initial': 0,
+                                'polarity': 'bipolar',
+                                'segments': [{'duration': None}],
+                            },
+                        },
                     ],
                     'transitions': [
                         {
@@ -296,7 +304,15 @@ def staged_patch(clock: str = 'seconds') -> envelfo.EnveLFO:
                     'kind': 'stages',
                     'initial_stage': 'waiting',
                     'stages': [
-                        {'name': 'waiting', 'envelfo': {'kind': 'hold', 'value': 0}},
+                        {
+                            'name': 'waiting',
+                            'envelfo': {
+                                'kind': 'envelope',
+                                'initial': 0,
+                                'polarity': 'bipolar',
+                                'segments': [{'duration': None}],
+                            },
+                        },
                         {
                             'name': 'high',
                             'envelfo': {
@@ -432,7 +448,15 @@ def test_command_events_keep_their_host_timestamp_while_beats_are_stopped() -> N
                     'kind': 'stages',
                     'initial_stage': 'waiting',
                     'stages': [
-                        {'name': 'waiting', 'envelfo': {'kind': 'hold', 'value': 0}}
+                        {
+                            'name': 'waiting',
+                            'envelfo': {
+                                'kind': 'envelope',
+                                'initial': 0,
+                                'polarity': 'bipolar',
+                                'segments': [{'duration': None}],
+                            },
+                        }
                     ],
                     'transitions': [
                         {

@@ -14,7 +14,6 @@ from ufor.envelfo import (
     Envelope,
     FinishStage,
     Generator,
-    Hold,
     Marker,
     Patch,
     PlaybackMode,
@@ -28,7 +27,7 @@ from ufor.envelfo import (
     Sum,
     instantiate_envelfo,
 )
-from ufor.segments import Segment
+from ufor.segments import IndefiniteSegment, Segment
 
 from envelfo.runtime import (
     advance_envelfo,
@@ -50,7 +49,10 @@ def staged_envelfo() -> EnveLFO:
     return Stages(
         initial_stage='waiting',
         stages=[
-            Stage(name='waiting', envelfo=Hold(value=0.0)),
+            Stage(
+                name='waiting',
+                envelfo=Envelope(initial=0.0, segments=[IndefiniteSegment()]),
+            ),
             Stage(
                 name='attack',
                 envelfo=Envelope(
@@ -103,13 +105,13 @@ def staged_envelfo() -> EnveLFO:
     )
 
 
-@pytest.mark.parametrize('kind', ['hold', 'lfo', 'envelope'])
+@pytest.mark.parametrize('kind', ['indefinite', 'lfo', 'envelope'])
 def test_next_stage_boundary_query_is_exact_and_does_not_advance_state(
     kind: str,
 ) -> None:
     child = (
-        Hold(value=0.5)
-        if kind == 'hold'
+        Envelope(initial=0.5, segments=[IndefiniteSegment()])
+        if kind == 'indefinite'
         else LFO(rate=2, markers=[Marker(name='pulse', position=Fraction(1, 2))])
         if kind == 'lfo'
         else Envelope(segments=[Segment(duration=Fraction(1, 4), to=1)])
@@ -121,7 +123,7 @@ def test_next_stage_boundary_query_is_exact_and_does_not_advance_state(
     saved = state.model_dump_json()
     assert next_stage_event(body, state.runtime, Fraction(1, 8)) is None
     boundary = next_stage_event(body, state.runtime, Fraction(1, 4))
-    if kind == 'hold':
+    if kind == 'indefinite':
         assert boundary is None
     else:
         assert boundary == (Fraction(1, 4), 0, 'pulse' if kind == 'lfo' else 'done')
@@ -576,7 +578,10 @@ def test_staged_loop_cycle_port_can_enter_another_stage() -> None:
                     playback=PlaybackMode.loop,
                 ),
             ),
-            Stage(name='held', envelfo=Hold(value=0.75)),
+            Stage(
+                name='held',
+                envelfo=Envelope(initial=0.75, segments=[IndefiniteSegment()]),
+            ),
         ],
         transitions=[
             StageTransition(
@@ -785,7 +790,10 @@ def test_final_repeat_emits_done_before_entering_next_stage() -> None:
                     repeat_count=1,
                 ),
             ),
-            Stage(name='held', envelfo=Hold(value=0.5)),
+            Stage(
+                name='held',
+                envelfo=Envelope(initial=0.5, segments=[IndefiniteSegment()]),
+            ),
         ],
         transitions=[
             StageTransition(

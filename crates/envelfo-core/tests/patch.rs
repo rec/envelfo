@@ -682,7 +682,7 @@ fn staged_patch() -> Patch {
                     Envelope::new(
                         0.0,
                         vec![Segment {
-                            duration: t(1, 2),
+                            duration: Some(t(1, 2)),
                             to: 1.0,
                             curve: 0.0,
                         }],
@@ -690,7 +690,20 @@ fn staged_patch() -> Patch {
                     .unwrap(),
                 ),
             ),
-            stage("off", Body::Hold(0.0)),
+            stage(
+                "off",
+                Body::Envelope(
+                    Envelope::new(
+                        0.0,
+                        vec![Segment {
+                            duration: None,
+                            to: 0.0,
+                            curve: 0.0,
+                        }],
+                    )
+                    .unwrap(),
+                ),
+            ),
         ],
         transitions: vec![Transition {
             from: vec!["on".into()],
@@ -701,14 +714,27 @@ fn staged_patch() -> Patch {
     let receiver = Stages {
         initial_stage: "waiting".into(),
         stages: vec![
-            stage("waiting", Body::Hold(0.0)),
+            stage(
+                "waiting",
+                Body::Envelope(
+                    Envelope::new(
+                        0.0,
+                        vec![Segment {
+                            duration: None,
+                            to: 0.0,
+                            curve: 0.0,
+                        }],
+                    )
+                    .unwrap(),
+                ),
+            ),
             stage(
                 "high",
                 Body::Envelope(
                     Envelope::new(
                         1.0,
                         vec![Segment {
-                            duration: t(1, 10),
+                            duration: Some(t(1, 10)),
                             to: 1.0,
                             curve: 0.0,
                         }],
@@ -754,7 +780,7 @@ fn attack() -> Envelope {
     let mut envelope = Envelope::new(
         0.0,
         vec![Segment {
-            duration: t(1, 2),
+            duration: Some(t(1, 2)),
             to: 1.0,
             curve: 0.0,
         }],

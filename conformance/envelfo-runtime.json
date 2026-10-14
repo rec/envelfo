@@ -1,7 +1,29 @@
 {
   "cases": [
     {
-      "name": "hold-is-a-stage",
+      "name": "indefinite-segments-advance-and-restore",
+      "definition": {
+        "kind": "envelope",
+        "segments": [
+          {"duration": "1/4 s", "to": 1},
+          {"duration": null},
+          {"duration": "1/2 s", "to": 0.5},
+          {"duration": null},
+          {"duration": "1/4 s", "to": 0}
+        ]
+      },
+      "steps": [
+        {"at": "1/8", "expected": {"value": 0.5, "weight": 1, "status": "running"}},
+        {"at": "100", "restore": true, "expected": {"value": 1, "weight": 1, "status": "held"}},
+        {"at": "100", "event": {"at": "100", "ordinal": 0, "action": "advance"}, "expected": {"value": 1, "weight": 1, "status": "running"}},
+        {"at": "401/4", "restore": true, "expected": {"value": 0.75, "weight": 1, "status": "running"}},
+        {"at": "101", "expected": {"value": 0.5, "weight": 1, "status": "held"}},
+        {"at": "101", "event": {"at": "101", "ordinal": 0, "action": "advance"}, "expected": {"value": 0.5, "weight": 1, "status": "running"}},
+        {"at": "405/4", "expected": {"value": 0, "weight": 1, "status": "complete"}}
+      ]
+    },
+    {
+      "name": "indefinite-envelope-is-a-stage",
       "definition": {
         "kind": "stages",
         "initial_stage": "held",
@@ -9,8 +31,9 @@
           {
             "name": "held",
             "envelfo": {
-              "kind": "hold",
-              "value": 0.25
+              "kind": "envelope",
+              "initial": 0.25,
+              "segments": [{"duration": null}]
             }
           }
         ]
@@ -363,8 +386,9 @@
           {
             "name": "held",
             "envelfo": {
-              "kind": "hold",
-              "value": 1
+              "kind": "envelope",
+              "initial": 1,
+              "segments": [{"duration": null}]
             }
           },
           {

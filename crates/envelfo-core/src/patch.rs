@@ -119,6 +119,7 @@ pub struct Patch {
 pub enum ChildCommand {
     Playback(Command),
     Start,
+    Advance,
     Sample,
     Cue(String),
 }
@@ -554,6 +555,7 @@ impl Patch {
             (Node::Envelope(body), ChildState::Envelope(current), command) => {
                 let command = match command {
                     ChildCommand::Start => EnvelopeCommand::Start,
+                    ChildCommand::Advance => EnvelopeCommand::Advance,
                     ChildCommand::Playback(c) => EnvelopeCommand::Playback(*c),
                     _ => return Err(Error::Unsupported("unsupported Envelope command")),
                 };
@@ -573,6 +575,7 @@ impl Patch {
                 let command = match command {
                     ChildCommand::Playback(c) => StageCommand::Playback(*c),
                     ChildCommand::Cue(c) => StageCommand::Cue(c.clone()),
+                    ChildCommand::Advance => StageCommand::Advance,
                     _ => return Err(Error::Unsupported("unsupported Stages command")),
                 };
                 body.advance(

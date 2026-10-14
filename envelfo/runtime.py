@@ -2,6 +2,7 @@
 
 from fractions import Fraction
 from math import ceil, floor
+from typing import Literal
 
 from ufor import control, envelfo, envelope, lfo, oscillator, segments
 
@@ -124,7 +125,9 @@ def initial_envelfo(
             position=_initial_position(definition, at).model_copy(
                 update={
                     'coordinate': Fraction(1)
-                    if not sum(s.duration for s in definition.segments)
+                    if not any(
+                        s.duration is None or s.duration for s in definition.segments
+                    )
                     else Fraction(0)
                 }
             ),
@@ -235,6 +238,8 @@ def envelfo_event(
     if isinstance(definition, envelfo.LFO) and isinstance(
         state.runtime, envelfo.LFOState
     ):
+        if event.action == 'advance':
+            raise ValueError('LFOs do not accept advance events')
         if event.action == 'cue':
             raise ValueError('LFOs do not accept cue events')
         if event.action == 'sample':
@@ -265,6 +270,11 @@ def envelfo_event(
     ):
         if event.action in ('cue', 'reset', 'transport', 'rate', 'sample'):
             raise ValueError('envelopes do not accept this event')
+        indefinite = _indefinite(definition)
+        if indefinite and event.action in ('seek', 'shift'):
+            raise ValueError(
+                'indefinite envelopes do not accept normalized position events'
+            )
         control.check_order(state.runtime.at, state.runtime.ordinal, event)
         runtime = state.runtime
         position = _position_at(runtime.position, event.at)
@@ -272,6 +282,7 @@ def envelfo_event(
         start_value = runtime.start_value
         traversals = runtime.traversals
         complete_coordinate = runtime.complete_coordinate
+        segment_index = runtime.segment_index
         if (
             phase == 'on'
             and complete_coordinate is None
@@ -304,24 +315,44 @@ def envelfo_event(
                 phase = 'on'
                 traversals = 0
                 complete_coordinate = None
+                segment_index = 0
                 position = position.model_copy(
                     update={
                         'coordinate': Fraction(0),
                         'age': Fraction(0),
-                        'rate': _envelope_rate(definition.segments),
+                        'rate': Fraction(1)
+                        if indefinite
+                        else _envelope_rate(definition.segments),
                     }
                 )
         elif event.action == 'note_off':
             if definition.release and phase == 'on' and observed.status != 'complete':
                 phase = 'release'
                 start_value = observed.value
+                segment_index = 0
                 position = position.model_copy(
                     update={
                         'coordinate': Fraction(0),
                         'age': Fraction(0),
-                        'rate': _envelope_rate(definition.release),
+                        'rate': Fraction(1)
+                        if indefinite
+                        else _envelope_rate(definition.release),
                     }
                 )
+        elif event.action == 'advance':
+            if phase == 'idle':
+                raise ValueError('advance requires an active indefinite segment')
+            active_segments = (
+                definition.release if phase == 'release' else definition.segments
+            )
+            segment_index, start_value = _advance_segment(
+                active_segments,
+                segment_index,
+                start_value,
+                position.coordinate,
+                indefinite,
+            )
+            position = position.model_copy(update={'coordinate': Fraction(0)})
         else:
             position = _position_command(position, event)
             if event.action == 'shift' and (
@@ -343,6 +374,7 @@ def envelfo_event(
                 position=position,
                 traversals=traversals,
                 complete_coordinate=complete_coordinate,
+                segment_index=segment_index,
             )
         )
     raise ValueError('envelfo state does not match its definition')
@@ -370,8 +402,14 @@ def advance_envelfo(
     if event is not None:
         if event.action in ('pause', 'resume', 'reverse', 'seek', 'shift', 'rate'):
             stage = next(s.envelfo for s in body.stages if s.name == current.stage)
-            if event.action in ('seek', 'shift') and isinstance(stage, envelfo.Hold):
-                raise ValueError('hold stages do not accept position events')
+            if (
+                event.action in ('seek', 'shift')
+                and isinstance(stage, envelfo.Envelope)
+                and _indefinite(stage)
+            ):
+                raise ValueError(
+                    'indefinite envelopes do not accept normalized position events'
+                )
             position = _position_command(_position_at(current.position, at), event)
             if (
                 event.action == 'shift'
@@ -391,6 +429,30 @@ def advance_envelfo(
                     'cursor_order': -1,
                 }
             )
+        elif event.action == 'advance':
+            stage = next(s.envelfo for s in body.stages if s.name == current.stage)
+            if not isinstance(stage, envelfo.Envelope) or current.completed:
+                raise ValueError('advance requires an active indefinite segment')
+            position = _position_at(current.position, at)
+            index, value = _advance_segment(
+                stage.segments,
+                current.segment_index,
+                current.entry_value,
+                position.coordinate,
+                _indefinite(stage),
+            )
+            current = current.model_copy(
+                update={
+                    'at': at,
+                    'segment_index': index,
+                    'entry_value': value,
+                    'stage_done': False,
+                    'position': position.model_copy(update={'coordinate': Fraction(0)}),
+                    'cursor_order': -1,
+                }
+            )
+            current, output = _advance_stages(body, current, at, True)
+            emitted.extend(output)
         else:
             key = f'cue.{event.cue}' if event.action == 'cue' else event.action
             activation = current.activation
@@ -422,8 +484,17 @@ def next_stage_event(
     if state.completed:
         return None
     stage = next(s.envelfo for s in body.stages if s.name == state.stage)
-    if isinstance(stage, envelfo.Hold):
-        return None
+    if (
+        isinstance(stage, envelfo.Envelope)
+        and _indefinite(stage)
+        and not state.stage_done
+        and all(s.duration == 0 for s in stage.segments[state.segment_index :])
+    ):
+        return (
+            (state.at, 0, 'done')
+            if (state.at <= limit if inclusive else state.at < limit)
+            else None
+        )
     candidates: list[tuple[Fraction, int, str]] = []
     position = state.position
     if position.paused or not position.rate:
@@ -431,7 +502,19 @@ def next_stage_event(
     start = position.coordinate
     forward = position.direction == 1
     if isinstance(stage, envelfo.Envelope):
-        if stage.playback == envelfo.PlaybackMode.once:
+        if _indefinite(stage):
+            remaining = stage.segments[state.segment_index :]
+            if any(s.duration is None for s in remaining):
+                return None
+            target = sum(
+                (s.duration for s in remaining if isinstance(s, segments.Segment)),
+                Fraction(0),
+            )
+            if forward and (start < target or start == target and not state.stage_done):
+                candidates.append(
+                    (state.at + (target - start) / position.rate, 0, 'done')
+                )
+        elif stage.playback == envelfo.PlaybackMode.once:
             for index, marker in enumerate(stage.markers):
                 target = marker.position
                 if (target > start if forward else target < start) or (
@@ -542,8 +625,14 @@ def next_stage_event(
     )
 
 
-def _envelope_rate(segments: list[segments.Segment]) -> Fraction:
-    duration = sum((s.duration for s in segments), Fraction(0))
+def _envelope_rate(
+    parts: list[segments.Segment | segments.IndefiniteSegment],
+) -> Fraction:
+    if any(s.duration is None for s in parts):
+        return Fraction(1)
+    duration = sum(
+        (s.duration for s in parts if isinstance(s, segments.Segment)), Fraction(0)
+    )
     return Fraction(1, 1) / duration if duration else Fraction(0)
 
 
@@ -621,16 +710,59 @@ def _repeat_boundary_coordinate(
 
 
 def _initial_position(
-    body: envelfo.Hold | envelfo.LFO | envelfo.Envelope, at: Fraction
+    body: envelfo.LFO | envelfo.Envelope, at: Fraction
 ) -> envelfo.EnvelfoPosition:
     if isinstance(body, envelfo.LFO):
         assert isinstance(body.rate, Fraction)
         return envelfo.EnvelfoPosition(at=at, coordinate=body.phase, rate=body.rate)
-    if isinstance(body, envelfo.Envelope):
-        return envelfo.EnvelfoPosition(
-            at=at, coordinate=Fraction(0), rate=_envelope_rate(body.segments)
-        )
-    return envelfo.EnvelfoPosition(at=at, coordinate=Fraction(0), rate=Fraction(0))
+    return envelfo.EnvelfoPosition(
+        at=at,
+        coordinate=Fraction(0),
+        rate=Fraction(1) if _indefinite(body) else _envelope_rate(body.segments),
+    )
+
+
+def _indefinite(body: envelfo.Envelope) -> bool:
+    return any(s.duration is None for s in [*body.segments, *body.release])
+
+
+def _segment_value(
+    parts: list[segments.Segment | segments.IndefiniteSegment],
+    index: int,
+    initial: float,
+    elapsed: Fraction,
+) -> tuple[float, Literal['running', 'held', 'complete'], int]:
+    value = initial
+    elapsed = max(Fraction(0), elapsed)
+    for offset, part in enumerate(parts[index:], index):
+        if isinstance(part, segments.IndefiniteSegment):
+            return value, 'held', offset
+        if elapsed < part.duration:
+            return (
+                value
+                + (part.to - value)
+                * envelope.curve_progress(float(elapsed / part.duration), part.curve),
+                'running',
+                offset,
+            )
+        elapsed -= part.duration
+        value = part.to
+    return value, 'complete', len(parts)
+
+
+def _advance_segment(
+    parts: list[segments.Segment | segments.IndefiniteSegment],
+    index: int,
+    initial: float,
+    elapsed: Fraction,
+    indefinite: bool,
+) -> tuple[int, float]:
+    if not indefinite:
+        raise ValueError('advance requires an active indefinite segment')
+    value, status, current = _segment_value(parts, index, initial, elapsed)
+    if status != 'held':
+        raise ValueError('advance requires an active indefinite segment')
+    return current + 1, value
 
 
 def _coordinate_at(position: envelfo.EnvelfoPosition, at: Fraction) -> Fraction:
@@ -686,8 +818,19 @@ def _envelope_value(
     if state.phase == 'idle':
         assert isinstance(body.initial, float)
         return envelfo.EnvelfoValue(value=body.initial, weight=1, status='idle')
-    segments = body.release if state.phase == 'release' else body.segments
-    duration = sum((s.duration for s in segments), Fraction(0))
+    parts = body.release if state.phase == 'release' else body.segments
+    if _indefinite(body):
+        value, status, _ = _segment_value(
+            parts,
+            state.segment_index,
+            state.start_value,
+            _coordinate_at(state.position, at),
+        )
+        if status == 'complete' and state.phase == 'on' and body.hold and body.release:
+            status = 'held'
+        return envelfo.EnvelfoValue(value=value, weight=1, status=status)
+    finite = [s for s in parts if isinstance(s, segments.Segment)]
+    duration = sum((s.duration for s in finite), Fraction(0))
     complete_coordinate = state.complete_coordinate
     if (
         complete_coordinate is None
@@ -711,7 +854,7 @@ def _envelope_value(
         else Fraction(1)
     )
     value = envelope.curve_at(
-        envelope.Curve(initial=state.start_value, segments=segments),
+        envelope.Curve(initial=state.start_value, segments=finite),
         coordinate * duration,
     )
     if complete_coordinate is not None:
@@ -740,6 +883,7 @@ def _advance_stages(
                 'at': time,
                 'ordinal': state.ordinal if state.at == time else -1,
                 'cursor_order': order,
+                'stage_done': state.stage_done or port == 'done',
                 'position': _position_at(state.position, time),
             }
         )
@@ -950,8 +1094,6 @@ def _stage_value(
             value=state.complete_value, weight=1, status='complete'
         )
     stage = next(s.envelfo for s in body.stages if s.name == state.stage)
-    if isinstance(stage, envelfo.Hold):
-        return envelfo.EnvelfoValue(value=stage.value, weight=1, status='held')
     position = state.position
     coordinate = _coordinate_at(position, at)
     if isinstance(stage, envelfo.LFO):
@@ -967,8 +1109,16 @@ def _stage_value(
             stage.shape, phase, stage.duty_cycle
         )
         return envelfo.EnvelfoValue(value=value, weight=1, status='running')
-    curve = envelope.Curve(initial=state.entry_value, segments=stage.segments)
-    duration = sum((s.duration for s in stage.segments), Fraction(0))
+    if _indefinite(stage):
+        value, status, _ = _segment_value(
+            stage.segments, state.segment_index, state.entry_value, coordinate
+        )
+        return envelfo.EnvelfoValue(
+            value=value, weight=1, status='held' if status == 'complete' else status
+        )
+    finite = [s for s in stage.segments if isinstance(s, segments.Segment)]
+    curve = envelope.Curve(initial=state.entry_value, segments=finite)
+    duration = sum((s.duration for s in finite), Fraction(0))
     bounded = _envelope_coordinate(coordinate, stage)
     complete = stage.repeat_count is not None and state.traversals >= stage.repeat_count
     if complete:
