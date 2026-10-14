@@ -380,6 +380,30 @@ def envelfo_event(
     raise ValueError('envelfo state does not match its definition')
 
 
+def envelope_complete_at(
+    definition: envelfo.Envelope, state: envelfo.EnvelfoState
+) -> Fraction | None:
+    """Release completion in the owning clock, or None while completion is unbounded."""
+    runtime = state.runtime
+    if not isinstance(runtime, envelfo.EnvelopeState):
+        raise ValueError('Envelope completion requires Envelope state')
+    if runtime.phase != 'release':
+        return None
+    parts = definition.release[runtime.segment_index :]
+    if any(s.duration is None for s in parts):
+        return None
+    total = sum(
+        (s.duration for s in parts if isinstance(s, segments.Segment)), Fraction(0)
+    )
+    position = runtime.position
+    target = total if _indefinite(definition) else Fraction(1)
+    if not total or position.coordinate >= target:
+        return position.at
+    if position.paused or position.direction == -1 or not position.rate:
+        return None
+    return position.at + (target - position.coordinate) / position.rate
+
+
 def advance_envelfo(
     definition: envelfo.EnveLFO,
     state: envelfo.EnvelfoState,

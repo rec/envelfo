@@ -355,6 +355,36 @@ impl Envelope {
             .any(|s| s.duration.is_none())
     }
 
+    /// Release completion in the owning clock; None while a wait or pause prevents it.
+    pub fn complete_at(&self, state: &EnvelopeState) -> Result<Option<Time>, Error> {
+        if state.phase != Phase::Release {
+            return Ok(None);
+        }
+        let parts = &self.release[state.segment_index..];
+        if parts.iter().any(|s| s.duration.is_none()) {
+            return Ok(None);
+        }
+        let total = duration(parts)?;
+        let position = &state.position;
+        let target = if self.indefinite() { total } else { Time::ONE };
+        if total == Time::ZERO || position.coordinate >= target {
+            return Ok(Some(position.at));
+        }
+        if position.paused
+            || position.direction == Direction::Reverse
+            || position.rate == Time::ZERO
+        {
+            return Ok(None);
+        }
+        Ok(Some(
+            position.at.checked_add(
+                target
+                    .checked_sub(position.coordinate)?
+                    .checked_div(position.rate)?,
+            )?,
+        ))
+    }
+
     pub(crate) fn coordinate(&self, raw: Time, release: bool) -> Result<Time, Error> {
         if release || self.playback == Playback::Once {
             return Ok(raw.clamp(Time::ZERO, Time::ONE));

@@ -18,6 +18,70 @@ fn waiting() -> Envelope {
 }
 
 #[test]
+fn release_completion_tracks_waits_and_playback_commands() {
+    let mut body = waiting();
+    body.release = vec![
+        Segment {
+            duration: None,
+            to: 0.0,
+            curve: 0.0,
+        },
+        Segment {
+            duration: Some(Time::ONE),
+            to: 0.0,
+            curve: 0.0,
+        },
+    ];
+    let mut state = body.initial(Time::ZERO).unwrap();
+    assert_eq!(body.complete_at(&state).unwrap(), None);
+    body.command(
+        &mut state,
+        Time::ZERO,
+        0,
+        EnvelopeCommand::Playback(Command::NoteOn),
+    )
+    .unwrap();
+    body.command(
+        &mut state,
+        Time::ONE,
+        0,
+        EnvelopeCommand::Playback(Command::NoteOff),
+    )
+    .unwrap();
+    assert_eq!(body.complete_at(&state).unwrap(), None);
+    body.command(
+        &mut state,
+        Time::from_integer(2),
+        0,
+        EnvelopeCommand::Advance,
+    )
+    .unwrap();
+    assert_eq!(
+        body.complete_at(&state).unwrap(),
+        Some(Time::from_integer(3))
+    );
+    body.command(
+        &mut state,
+        Time::from_integer(2),
+        1,
+        EnvelopeCommand::Playback(Command::Pause),
+    )
+    .unwrap();
+    assert_eq!(body.complete_at(&state).unwrap(), None);
+    body.command(
+        &mut state,
+        Time::from_integer(4),
+        0,
+        EnvelopeCommand::Playback(Command::Resume),
+    )
+    .unwrap();
+    assert_eq!(
+        body.complete_at(&state).unwrap(),
+        Some(Time::from_integer(5))
+    );
+}
+
+#[test]
 fn release_bypasses_wait_and_invalid_commands_preserve_state() {
     let mut body = waiting();
     body.release = vec![Segment {

@@ -4,7 +4,53 @@ import pytest
 from ufor import envelfo
 
 from envelfo import patch
-from envelfo.runtime import advance_envelfo, envelfo_at, envelfo_event, initial_envelfo
+from envelfo.runtime import (
+    advance_envelfo,
+    envelfo_at,
+    envelfo_event,
+    envelope_complete_at,
+    initial_envelfo,
+)
+
+
+@pytest.mark.parametrize('waiting', [False, True])
+def test_release_completion_tracks_waits_pause_resume_and_advance(
+    waiting: bool,
+) -> None:
+    body = envelfo.Envelope.model_validate(
+        {
+            'segments': [{'duration': None}],
+            'release': ([{'duration': None}] if waiting else [])
+            + [{'duration': '1/2 s', 'to': 0}],
+        }
+    )
+    state = initial_envelfo(body, Fraction(0))
+    assert envelope_complete_at(body, state) is None
+    state = envelfo_event(
+        body, state, envelfo.EnvelfoEvent(at=Fraction(0), ordinal=0, action='note_on')
+    )
+    state = envelfo_event(
+        body, state, envelfo.EnvelfoEvent(at=Fraction(1), ordinal=0, action='note_off')
+    )
+    assert envelope_complete_at(body, state) == (None if waiting else Fraction(3, 2))
+    if waiting:
+        state = envelfo_event(
+            body,
+            state,
+            envelfo.EnvelfoEvent(at=Fraction(2), ordinal=0, action='advance'),
+        )
+    state = envelfo_event(
+        body,
+        state,
+        envelfo.EnvelfoEvent(
+            at=Fraction(2 if waiting else 1), ordinal=1, action='pause'
+        ),
+    )
+    assert envelope_complete_at(body, state) is None
+    state = envelfo_event(
+        body, state, envelfo.EnvelfoEvent(at=Fraction(3), ordinal=0, action='resume')
+    )
+    assert envelope_complete_at(body, state) == Fraction(7, 2)
 
 
 def definition() -> envelfo.Envelope:
