@@ -3,6 +3,69 @@ use envelfo_core::lfo::{Clock, Command, Driver, LFO, Reset, Shape};
 use envelfo_core::time::Time;
 
 #[test]
+fn marker_queries_follow_commands_and_preserve_snapshots() {
+    let definition = LFO::new(Time::ONE).unwrap();
+    let marker = Time::new(1, 3).unwrap();
+    let mut state = definition.initial(Time::ZERO).unwrap();
+    let saved = state.clone();
+    assert_eq!(
+        definition
+            .next_marker(&state, marker, Time::ZERO, marker, false)
+            .unwrap(),
+        None
+    );
+    assert_eq!(
+        definition
+            .next_marker(&state, marker, Time::ZERO, marker, true)
+            .unwrap(),
+        Some(marker)
+    );
+    assert_eq!(state, saved);
+    definition
+        .command(&mut state, Time::new(1, 4).unwrap(), 0, Command::Pause)
+        .unwrap();
+    assert_eq!(
+        definition
+            .next_marker(&state, marker, Time::ONE, Time::from_integer(2), true)
+            .unwrap(),
+        None
+    );
+    definition
+        .command(&mut state, Time::ONE, 0, Command::Resume)
+        .unwrap();
+    assert_eq!(
+        definition
+            .next_marker(&state, marker, Time::ONE, Time::from_integer(2), true)
+            .unwrap(),
+        Some(Time::new(13, 12).unwrap())
+    );
+    definition
+        .command(&mut state, Time::ONE, 1, Command::Reverse)
+        .unwrap();
+    assert_eq!(
+        definition
+            .next_marker(&state, Time::ZERO, Time::ONE, Time::from_integer(2), true)
+            .unwrap(),
+        Some(Time::new(5, 4).unwrap())
+    );
+    definition
+        .command(&mut state, Time::ONE, 2, Command::Seek(marker))
+        .unwrap();
+    assert_eq!(
+        definition
+            .next_marker(&state, marker, Time::ZERO, Time::from_integer(2), true)
+            .unwrap(),
+        Some(Time::from_integer(2))
+    );
+    let saved = state.clone();
+    assert_eq!(
+        definition.next_marker(&state, Time::ONE, Time::ZERO, Time::ONE, true),
+        Err(Error::InvalidDefinition("LFO marker must be in [0, 1)"))
+    );
+    assert_eq!(state, saved);
+}
+
+#[test]
 fn reverse_seek_shift_and_clone_preserve_exact_position() {
     let mut definition = LFO::new(Time::ONE).unwrap();
     definition.shape = Shape::Triangle;

@@ -127,6 +127,58 @@ impl LFO {
         self.signal(coordinate, weight, false)
     }
 
+    /// Next crossing of a normalized marker, strictly after the supplied cursor.
+    /// Commands at the cursor preempt obsolete crossings; this query does not mutate state.
+    pub fn next_marker(
+        &self,
+        state: &LFOState,
+        marker: Time,
+        after: Time,
+        limit: Time,
+        inclusive: bool,
+    ) -> Result<Option<Time>, Error> {
+        self.validate()?;
+        if self.driver != Driver::Elapsed {
+            return Err(Error::Unsupported(
+                "transport-position LFO has no elapsed markers",
+            ));
+        }
+        if marker < Time::ZERO || marker >= Time::ONE {
+            return Err(Error::InvalidDefinition("LFO marker must be in [0, 1)"));
+        }
+        if limit < after {
+            return Err(Error::TimeReversed);
+        }
+        let position = &state.position;
+        if position.paused || position.rate == Time::ZERO {
+            return Ok(None);
+        }
+        let previous = after.max(position.at);
+        if previous > limit {
+            return Ok(None);
+        }
+        let coordinate = position.advanced(previous)?.coordinate;
+        let offset = coordinate.checked_sub(marker)?;
+        let turn = if position.direction == Direction::Forward {
+            offset.floor().checked_add(1)
+        } else {
+            offset.ceil().checked_sub(1)
+        }
+        .ok_or(Error::Overflow)?;
+        let target = Time::from_integer(turn).checked_add(marker)?;
+        let at = previous.checked_add(
+            target
+                .checked_sub(coordinate)?
+                .checked_abs()?
+                .checked_div(position.rate)?,
+        )?;
+        Ok(if at < limit || inclusive && at == limit {
+            Some(at)
+        } else {
+            None
+        })
+    }
+
     pub(crate) fn staged_value(&self, position: &Position) -> Result<Value, Error> {
         let weight = if position.age < self.delay {
             0.0

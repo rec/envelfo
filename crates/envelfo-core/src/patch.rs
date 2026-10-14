@@ -28,7 +28,7 @@ use crate::envelope::{
     Envelope, EnvelopeCommand, EnvelopeState, Initial, Marker, Playback, Retrigger, Start,
     validate_markers,
 };
-use crate::lfo::{Command, Direction, Driver, LFO, LFOState};
+use crate::lfo::{Command, Driver, LFO, LFOState};
 use crate::random::{random_word, stream_key};
 use crate::sample_hold::{SampleCommand, SampleHold, SampleState};
 use crate::signal::Operator;
@@ -635,35 +635,22 @@ impl Patch {
                             }
                         }
                     }
-                    (Node::LFO { markers, .. }, Some(ChildState::Lfo(current)))
+                    (Node::LFO { body, markers }, Some(ChildState::Lfo(current)))
                         if !markers.is_empty() =>
                     {
-                        let position = &current.position;
-                        if position.paused || position.rate == Time::ZERO {
-                            continue;
-                        }
-                        let previous = position.at.max(clock.local_time(state.at)?);
-                        let coordinate = position.advanced(previous)?.coordinate;
-                        let forward = position.direction == Direction::Forward;
+                        let previous = clock.local_time(state.at)?;
                         for marker in markers {
-                            let offset = coordinate.checked_sub(marker.position)?;
-                            let turn = if forward {
-                                offset.floor().checked_add(1)
-                            } else {
-                                offset.ceil().checked_sub(1)
-                            }
-                            .ok_or(Error::Overflow)?;
-                            let target = Time::from_integer(turn).checked_add(marker.position)?;
-                            let local = previous.checked_add(
-                                target
-                                    .checked_sub(coordinate)?
-                                    .checked_abs()?
-                                    .checked_div(position.rate)?,
-                            )?;
-                            // An unreachable future beat boundary has no delivery yet.
-                            if local > local_limit {
+                            // Host-time inclusion is checked below, including stopped clocks.
+                            let Some(local) = body.next_marker(
+                                current,
+                                marker.position,
+                                previous,
+                                local_limit,
+                                true,
+                            )?
+                            else {
                                 continue;
-                            }
+                            };
                             let seconds = clock
                                 .host_time(local)?
                                 .ok_or(Error::InvalidDefinition("local marker has no host time"))?;
