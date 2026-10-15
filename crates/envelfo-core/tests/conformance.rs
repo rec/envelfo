@@ -7,6 +7,30 @@ use envelfo_core::time::Time;
 use envelfo_core::{patch, signal};
 use serde_json::Value;
 
+// Exercise the same traces using actual disk-format continuation when enabled.
+macro_rules! continuation {
+    ($kind:ident, $definition:expr, $state:expr) => {{
+        #[cfg(feature = "snapshots")]
+        {
+            use envelfo_core::snapshot::Snapshot;
+            let snapshot = Snapshot::$kind {
+                definition: $definition.clone(),
+                state: $state.clone(),
+            };
+            let restored = Snapshot::from_json(&snapshot.to_json().unwrap()).unwrap();
+            assert_eq!(restored, snapshot);
+            let Snapshot::$kind { state, .. } = restored else {
+                unreachable!()
+            };
+            state
+        }
+        #[cfg(not(feature = "snapshots"))]
+        {
+            $state.clone()
+        }
+    }};
+}
+
 #[test]
 fn patch_orchestration_matches_shared_observation_and_delivery_traces() {
     for text in [
@@ -24,8 +48,8 @@ fn patch_orchestration_matches_shared_observation_and_delivery_traces() {
                 .initial(Time::ZERO, "patch", 0, None, &clock)
                 .unwrap();
             for step in case["steps"].as_array().unwrap() {
-                if step["restore"] == true {
-                    state = state.clone();
+                if cfg!(feature = "snapshots") || step["restore"] == true {
+                    state = continuation!(Patch, definition, state);
                 }
                 let mut events = vec![];
                 if let Some(commands) = step["commands"].as_array() {
@@ -93,8 +117,8 @@ fn bodies_match_every_shared_trace() {
                 let mut state = envelope.initial(Time::ZERO).unwrap();
                 for step in case["steps"].as_array().unwrap() {
                     let at = rational(&step["at"]);
-                    if step["restore"] == true {
-                        state = state.clone();
+                    if cfg!(feature = "snapshots") || step["restore"] == true {
+                        state = continuation!(Envelope, envelope, state);
                     }
                     if !step["event"].is_null() {
                         let event = &step["event"];
@@ -125,8 +149,8 @@ fn bodies_match_every_shared_trace() {
                 let mut state = stages.initial(Time::ZERO).unwrap();
                 for step in case["steps"].as_array().unwrap() {
                     let at = rational(&step["at"]);
-                    if step["restore"] == true {
-                        state = state.clone();
+                    if cfg!(feature = "snapshots") || step["restore"] == true {
+                        state = continuation!(Stages, stages, state);
                     }
                     let event = if step["event"].is_null() {
                         None
@@ -269,8 +293,8 @@ fn check_lfo(case: &Value) {
     for step in case["steps"].as_array().unwrap() {
         assert!(step["events"].is_null() || step["events"].as_array().unwrap().is_empty());
         assert!(step["runtime"].is_null() || step["runtime"].as_object().unwrap().is_empty());
-        if step["restore"] == true {
-            state = state.clone();
+        if cfg!(feature = "snapshots") || step["restore"] == true {
+            state = continuation!(LFO, lfo, state);
         }
         let at = rational(&step["at"]);
         let event = &step["event"];

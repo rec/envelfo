@@ -18,7 +18,7 @@ not an allocation-free audio callback guarantee or a promise of additional APIs.
 | Event division, offset, chance, cascades, delays and capacities | `envelfo.patch` | `patch` | Shared host division/offset/delivery traces; focused random/cascade/capacity rollback tests |
 | Per-child clocks, stop/seek observations, direct song position | Host `TempoMap` supplied to `patch` | Host `ClockMapping` supplied to `patch` | One shared host trace across stops, tempo changes and forward/backward song seeks |
 | Same-time commands and explicit observation/delivery phases | `patch_event` / `settle_patch` | `Patch::command` / `settle` | Shared addressed command/release trace; preemption and boundary tests |
-| Continuation with retained state and pending events | Pydantic JSON snapshots | Independent state clones | Shared restore points and host pending-queue expectations; rollback/isolation tests |
+| Continuation with retained state and pending events | Pydantic JSON snapshots | State clones; optional versioned JSON | Shared traces restore JSON at every step with `snapshots`; exact random, pending-queue and malformed-state tests |
 | Audio integration | enge sampling, routes, scope and voice lifecycle | enge adapters over core state | Full enge suite and native/Python Patch regressions |
 | Expressive arpeg integration | Optional `arpeg.envelfo` bridge | Separate `arpeg-envelfo` crate | Shared arpeg composition wire trace; host clock and pending-delivery continuation tests |
 
@@ -57,8 +57,11 @@ kind was rejected before its generator was checked.
   and explicit overflow errors. Python Fractions are not limited to that range.
 - Rust accepts normalized definitions and host clock mappings, not Pint strings,
   authored document parsing or MIDI clock acquisition.
-- Python snapshots serialize to JSON. Rust continuation uses clones, not a disk
-  format or cross-language interchange. Hosts save their own pending deliveries.
+- Python snapshots serialize to JSON. Rust's optional `snapshots` feature bundles
+  normalized definitions and complete state in versioned JSON, including Patch
+  pending connections and RNG streams. Cross-language interchange is not provided.
+  Hosts save clock mappings and external delivery queues themselves; combined
+  enge/arpeg application snapshots remain host-owned.
 - Stateful operators require the same observation schedule for equivalent
   continuation. Additional observations can legitimately change their output.
 - Scalar LFO onset is a separate activation weight; staged LFO onset scales
@@ -83,6 +86,8 @@ SHA-256 dependencies, without num-rational's default BigInt feature. It contains
 no Python, PyO3, MIDI device host or audio engine. The crate packages and verifies
 independently. Its packaged `LICENSE` carries the project's MIT notices.
 The root and crate copies of that notice must stay identical.
+Enabling `snapshots` adds optional Serde/serde_json dependencies; the default
+runtime dependency tree is unchanged. JSON parsing enables exact float round trips.
 
 The reviewed runtime manifests identify enveLFO, uFor and reccy as MIT;
 Rust runtime dependencies are MIT or dual MIT/Apache-2.0. Retain dependency
@@ -109,13 +114,20 @@ uv run --no-sync ty check envelfo
 cargo test --workspace --locked
 cargo test --workspace --locked --release
 cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo test --workspace --locked --features snapshots
+cargo test --workspace --locked --release --features snapshots
+cargo clippy --workspace --all-targets --locked --features snapshots -- -D warnings
 uv build
 cargo package --manifest-path crates/envelfo-core/Cargo.toml --locked
+cargo package --manifest-path crates/envelfo-core/Cargo.toml --locked --features snapshots
 ```
 
 `.github/workflows/test.yml` runs only when a release is published. It gates
 Linux, Windows and macOS, Python 3.13/3.15, tests against a wheel installed in a
 fresh environment outside the checkout, and standalone Rust package verification.
+Rust checks run with snapshots disabled and enabled, including debug/release
+tests and independent package compilation. The enabled shared conformance runner
+serializes and reloads every continuation step, not just explicit restore points.
 The full repository tests retain access to the shared fixtures; the published
 crate's build verification is independent of those repository-level test assets.
 Cross-platform results are not claimed until that release workflow runs.

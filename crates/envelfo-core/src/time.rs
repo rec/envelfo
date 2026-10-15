@@ -13,6 +13,21 @@ pub struct Time {
     denominator: i64,
 }
 
+#[cfg(feature = "snapshots")]
+impl serde::Serialize for Time {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&format!("{}/{}", self.numerator, self.denominator))
+    }
+}
+
+#[cfg(feature = "snapshots")]
+impl<'de> serde::Deserialize<'de> for Time {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let literal = <String as serde::Deserialize>::deserialize(deserializer)?;
+        literal.parse().map_err(serde::de::Error::custom)
+    }
+}
+
 impl Time {
     pub const ZERO: Self = Self::from_integer(0);
     pub const ONE: Self = Self::from_integer(1);

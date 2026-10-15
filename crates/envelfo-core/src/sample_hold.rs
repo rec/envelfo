@@ -7,6 +7,8 @@ use crate::time::Time;
 use crate::{Error, Status};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(feature = "snapshots", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "snapshots", serde(deny_unknown_fields))]
 pub struct SampleHold {
     pub minimum: f64,
     pub maximum: f64,
@@ -24,6 +26,30 @@ pub struct SampleState {
     pub(crate) ordinal: Option<u64>,
     value: f64,
     random: u64,
+}
+
+#[cfg(feature = "snapshots")]
+pub(crate) mod snapshot {
+    use super::*;
+
+    #[derive(serde::Serialize, serde::Deserialize)]
+    #[serde(remote = "SampleState", deny_unknown_fields)]
+    pub(crate) struct State {
+        at: Time,
+        ordinal: Option<u64>,
+        value: f64,
+        random: u64,
+    }
+
+    pub(crate) fn validate(body: &SampleHold, state: &SampleState) -> Result<(), Error> {
+        body.validate()?;
+        if !state.value.is_finite() || state.value < body.minimum || state.value > body.maximum {
+            return Err(Error::InvalidDefinition(
+                "invalid SampleHold snapshot value",
+            ));
+        }
+        Ok(())
+    }
 }
 
 impl SampleHold {

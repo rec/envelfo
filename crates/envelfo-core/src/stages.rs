@@ -10,12 +10,16 @@ use crate::time::Time;
 use crate::{Error, Status};
 
 #[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "snapshots", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "snapshots", serde(deny_unknown_fields))]
 pub enum Body {
     LFO(LFO),
     Envelope(Envelope),
 }
 
 #[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "snapshots", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "snapshots", serde(deny_unknown_fields))]
 pub struct Stage {
     pub name: String,
     pub body: Body,
@@ -23,12 +27,16 @@ pub struct Stage {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "snapshots", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "snapshots", serde(deny_unknown_fields))]
 pub enum Action {
     Enter(String),
     Finish,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "snapshots", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "snapshots", serde(deny_unknown_fields))]
 pub struct Transition {
     pub from: Vec<String>,
     pub event: String,
@@ -36,6 +44,8 @@ pub struct Transition {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "snapshots", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "snapshots", serde(deny_unknown_fields))]
 pub struct Stages {
     pub initial_stage: String,
     pub stages: Vec<Stage>,
@@ -95,6 +105,59 @@ impl StageState {
     }
     pub fn traversals(&self) -> u64 {
         self.traversals
+    }
+}
+
+#[cfg(feature = "snapshots")]
+pub(crate) mod snapshot {
+    use super::*;
+
+    #[derive(serde::Serialize, serde::Deserialize)]
+    #[serde(remote = "StageState", deny_unknown_fields)]
+    pub(crate) struct State {
+        at: Time,
+        ordinal: Option<u64>,
+        stage: usize,
+        entry_value: f64,
+        position: Position,
+        activation: u64,
+        cursor: Option<usize>,
+        completed: bool,
+        complete_value: Option<f64>,
+        traversals: u64,
+        segment_index: usize,
+        stage_done: bool,
+    }
+
+    pub(crate) fn validate(body: &Stages, state: &StageState) -> Result<(), Error> {
+        body.validate()?;
+        state.position.validate_snapshot()?;
+        let stage = body
+            .stages
+            .get(state.stage)
+            .ok_or(Error::InvalidDefinition("invalid snapshot Stage index"))?;
+        let (segments, cursor, repeats) = match &stage.body {
+            Body::LFO(_) => (0, stage.markers.len().checked_sub(1), None),
+            Body::Envelope(e) => (
+                if e.indefinite() { e.segments.len() } else { 0 },
+                Some(e.markers.len() + usize::from(e.playback == Playback::PingPong)),
+                e.repeat_count,
+            ),
+        };
+        if !state.entry_value.is_finite()
+            || state.entry_value.abs() > 1.0
+            || state
+                .complete_value
+                .is_some_and(|v| !v.is_finite() || v.abs() > 1.0)
+            || state.completed != state.complete_value.is_some()
+            || state.position.at != state.at
+            || state.segment_index > segments
+            || state.cursor.is_some_and(|c| cursor.is_none_or(|m| c > m))
+            || repeats.is_some_and(|n| state.traversals > n)
+        {
+            return Err(Error::InvalidDefinition("invalid Stages snapshot state"));
+        }
+        Ok(())
     }
 }
 

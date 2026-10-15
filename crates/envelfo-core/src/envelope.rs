@@ -6,6 +6,8 @@ use crate::time::Time;
 use crate::{Error, Status};
 
 #[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "snapshots", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "snapshots", serde(deny_unknown_fields))]
 pub struct Segment {
     /// None holds the incoming value until Advance; to and curve are unused.
     pub duration: Option<Time>,
@@ -14,18 +16,24 @@ pub struct Segment {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "snapshots", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "snapshots", serde(deny_unknown_fields))]
 pub struct Marker {
     pub name: String,
     pub position: Time,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(feature = "snapshots", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "snapshots", serde(deny_unknown_fields))]
 pub enum Initial {
     Value(f64),
     Current,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "snapshots", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "snapshots", serde(deny_unknown_fields))]
 pub enum Playback {
     Once,
     Loop,
@@ -33,6 +41,8 @@ pub enum Playback {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "snapshots", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "snapshots", serde(deny_unknown_fields))]
 pub enum Retrigger {
     Current,
     Initial,
@@ -40,12 +50,16 @@ pub enum Retrigger {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "snapshots", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "snapshots", serde(deny_unknown_fields))]
 pub enum Start {
     Activation,
     Event,
 }
 
 #[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "snapshots", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "snapshots", serde(deny_unknown_fields))]
 pub struct Envelope {
     pub initial: Initial,
     pub segments: Vec<Segment>,
@@ -504,6 +518,7 @@ pub enum EnvelopeCommand {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "snapshots", derive(serde::Serialize, serde::Deserialize))]
 pub enum Phase {
     Idle,
     On,
@@ -524,6 +539,51 @@ pub struct EnvelopeState {
 impl EnvelopeState {
     pub fn phase(&self) -> Phase {
         self.phase
+    }
+}
+
+#[cfg(feature = "snapshots")]
+pub(crate) mod snapshot {
+    use super::*;
+
+    #[derive(serde::Serialize, serde::Deserialize)]
+    #[serde(remote = "EnvelopeState", deny_unknown_fields)]
+    pub(crate) struct State {
+        position: Position,
+        ordinal: Option<u64>,
+        phase: Phase,
+        start_value: f64,
+        traversals: u64,
+        complete_coordinate: Option<Time>,
+        segment_index: usize,
+    }
+
+    pub(crate) fn validate(body: &Envelope, state: &EnvelopeState) -> Result<(), Error> {
+        body.validate()?;
+        state.position.validate_snapshot()?;
+        let parts = if state.phase == Phase::Release {
+            &body.release
+        } else {
+            &body.segments
+        };
+        if body.initial == Initial::Current
+            || !state.start_value.is_finite()
+            || state.start_value < if body.bipolar { -1.0 } else { 0.0 }
+            || state.start_value > 1.0
+            || state.segment_index > parts.len()
+            || (!body.indefinite() && state.segment_index != 0)
+            || (state.phase == Phase::Release && body.release.is_empty())
+            || body.repeat_count.is_some_and(|n| state.traversals > n)
+            || (body.repeat_count.is_none() && state.traversals != 0)
+            || state.complete_coordinate.is_some()
+                != body.repeat_count.is_some_and(|n| state.traversals == n)
+            || state
+                .complete_coordinate
+                .is_some_and(|p| p < Time::ZERO || p > Time::ONE)
+        {
+            return Err(Error::InvalidDefinition("invalid Envelope snapshot state"));
+        }
+        Ok(())
     }
 }
 

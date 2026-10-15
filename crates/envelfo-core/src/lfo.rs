@@ -7,6 +7,8 @@ use crate::time::Time;
 use crate::{Error, Status};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "snapshots", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "snapshots", serde(deny_unknown_fields))]
 pub enum Shape {
     Sine,
     Square,
@@ -14,6 +16,8 @@ pub enum Shape {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "snapshots", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "snapshots", serde(deny_unknown_fields))]
 pub enum Reset {
     Trigger,
     Transport,
@@ -21,18 +25,24 @@ pub enum Reset {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "snapshots", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "snapshots", serde(deny_unknown_fields))]
 pub enum Clock {
     Seconds,
     Beats,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "snapshots", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "snapshots", serde(deny_unknown_fields))]
 pub enum Driver {
     Elapsed,
     Transport,
 }
 
 #[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "snapshots", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "snapshots", serde(deny_unknown_fields))]
 pub struct LFO {
     pub shape: Shape,
     pub rate: Time,
@@ -268,6 +278,7 @@ impl LFO {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "snapshots", derive(serde::Serialize, serde::Deserialize))]
 pub enum Direction {
     Forward,
     Reverse,
@@ -277,6 +288,23 @@ pub enum Direction {
 pub struct LFOState {
     pub(crate) ordinal: Option<u64>,
     pub(crate) position: Position,
+}
+
+#[cfg(feature = "snapshots")]
+pub(crate) mod snapshot {
+    use super::*;
+
+    #[derive(serde::Serialize, serde::Deserialize)]
+    #[serde(remote = "LFOState", deny_unknown_fields)]
+    pub(crate) struct State {
+        ordinal: Option<u64>,
+        position: Position,
+    }
+
+    pub(crate) fn validate(body: &LFO, state: &LFOState) -> Result<(), Error> {
+        body.validate()?;
+        state.position.validate_snapshot()
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
