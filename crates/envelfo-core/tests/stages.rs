@@ -40,6 +40,29 @@ fn irregular_partitions_and_cloned_continuations_preserve_all_events() {
 }
 
 #[test]
+fn repeated_observation_at_a_consumed_boundary_preserves_state_and_events() {
+    for mode in [Playback::Once, Playback::Loop, Playback::PingPong] {
+        let body = repeated(mode, false, None);
+        let mut state = body.initial(Time::ZERO).unwrap();
+        let at = t(3, 4);
+        let first = body.advance(&mut state, at, None).unwrap();
+        assert!(!first.events.is_empty());
+        let saved = state.clone();
+        for _ in 0..3 {
+            let again = body.advance(&mut state, at, None).unwrap();
+            assert_eq!(again.value, first.value);
+            assert!(again.events.is_empty());
+            assert_eq!(state, saved);
+        }
+        assert_eq!(
+            body.advance(&mut state, t(1, 2), None),
+            Err(Error::TimeReversed)
+        );
+        assert_eq!(state, saved);
+    }
+}
+
+#[test]
 fn reverse_markers_are_ordered_before_named_boundary_events() {
     let body = repeated(Playback::Loop, true, None);
     let mut state = body.initial(Time::ZERO).unwrap();

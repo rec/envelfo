@@ -364,10 +364,10 @@ impl Patch {
         for (index, child) in self.children.iter().enumerate() {
             if let Some(current) = &next.children[index] {
                 let local = clock.local_time(&child.name, at)?;
-                signals.insert(child.name.clone(), self.value(index, current, local)?);
+                signals.insert(child.name.as_str(), self.value(index, current, local)?);
             } else if child.node == Node::Input {
                 signals.insert(
-                    child.name.clone(),
+                    child.name.as_str(),
                     next.inputs[index].ok_or(Error::InvalidDefinition(
                         "host signal has not been supplied",
                     ))?,
@@ -381,8 +381,17 @@ impl Patch {
         let mut edges = vec![];
         for &index in &next.order {
             if let Node::Signal(operator) = &self.children[index].node {
-                let (value, edge) = operator.observe(&signals, next.retained[index], seconds)?;
-                signals.insert(self.children[index].name.clone(), value);
+                let (value, edge) = operator.observe_with(
+                    |name| {
+                        signals
+                            .get(name)
+                            .copied()
+                            .ok_or(Error::InvalidDefinition("missing Patch signal input"))
+                    },
+                    next.retained[index],
+                    seconds,
+                )?;
+                signals.insert(self.children[index].name.as_str(), value);
                 if operator.retained() {
                     next.retained[index] = Some(value);
                 }
@@ -409,7 +418,7 @@ impl Patch {
         let values = self
             .outputs
             .iter()
-            .map(|o| (o.name.clone(), signals[&o.source]))
+            .map(|o| (o.name.clone(), signals[o.source.as_str()]))
             .collect();
         *state = next;
         Ok(PatchAdvance { values, events })
@@ -710,19 +719,19 @@ impl Patch {
             if connection.source.child != *source || connection.source.port != port {
                 continue;
             }
-            let capture = connection.action == ConnectionAction::Capture;
-            let command = match &connection.action {
-                ConnectionAction::Capture => format!("capture-{}-{order}", connection.target),
-                ConnectionAction::Cue(_) => format!("cue-{order}"),
-                _ => format!("start-{order}"),
-            };
-            let target_name = if capture {
-                state.name.clone()
-            } else {
-                format!("patch-{}-{}", state.name, connection.target)
-            };
-            let identity = format!("{target_name}:{command}");
-            if state.gates[order].forward(connection, state.seed, &identity) {
+            if state.gates[order].forward(connection, state.seed, || {
+                let command = match &connection.action {
+                    ConnectionAction::Capture => format!("capture-{}-{order}", connection.target),
+                    ConnectionAction::Cue(_) => format!("cue-{order}"),
+                    _ => format!("start-{order}"),
+                };
+                let target_name = if connection.action == ConnectionAction::Capture {
+                    state.name.clone()
+                } else {
+                    format!("patch-{}-{}", state.name, connection.target)
+                };
+                format!("{target_name}:{command}")
+            }) {
                 if state.pending.len() == 4096 {
                     return Err(Error::PendingCapacity);
                 }
@@ -1023,7 +1032,12 @@ struct Gate {
 }
 
 impl Gate {
-    fn forward(&mut self, connection: &Connection, seed: u64, identity: &str) -> bool {
+    fn forward(
+        &mut self,
+        connection: &Connection,
+        seed: u64,
+        identity: impl FnOnce() -> String,
+    ) -> bool {
         let count = self.count.unwrap_or(connection.offset);
         self.count = Some(if count == 0 {
             connection.every - 1
@@ -1039,7 +1053,7 @@ impl Gate {
         }
         let state = self
             .random
-            .get_or_insert_with(|| seed ^ stream_key(0, identity));
+            .get_or_insert_with(|| seed ^ stream_key(0, &identity()));
         random_word(state) >> 11 < threshold
     }
 }

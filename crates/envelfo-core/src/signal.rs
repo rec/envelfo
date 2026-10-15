@@ -83,15 +83,28 @@ impl Operator {
         previous: Option<f64>,
         seconds: Time,
     ) -> Result<(f64, Option<&'static str>), Error> {
+        self.observe_with(
+            |name| {
+                signals
+                    .get(name)
+                    .copied()
+                    .ok_or(Error::InvalidDefinition("missing Patch signal input"))
+            },
+            previous,
+            seconds,
+        )
+    }
+
+    /// Resolve inputs without requiring temporary copies of graph-owned names.
+    pub(crate) fn observe_with(
+        &self,
+        input: impl Fn(&str) -> Result<f64, Error>,
+        previous: Option<f64>,
+        seconds: Time,
+    ) -> Result<(f64, Option<&'static str>), Error> {
         if seconds < Time::ZERO {
             return Err(Error::TimeReversed);
         }
-        let input = |name: &str| {
-            signals
-                .get(name)
-                .copied()
-                .ok_or(Error::InvalidDefinition("missing Patch signal input"))
-        };
         let mut edge = None;
         let value = match self {
             Self::Sum(inputs) => inputs

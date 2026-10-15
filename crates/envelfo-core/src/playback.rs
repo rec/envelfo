@@ -40,6 +40,9 @@ impl Position {
         if at < self.at {
             return Err(Error::TimeReversed);
         }
+        if at == self.at {
+            return Ok(self.clone());
+        }
         let elapsed = at.checked_sub(self.at)?;
         let mut next = self.clone();
         if !self.paused {
