@@ -69,9 +69,11 @@ kind was rejected before its generator was checked.
 - enge's linear-only preparation restrictions, voice-amplitude profile policy
   and event-free audio accelerators are host restrictions, not absent core curves.
 - Standalone Python bindings to Rust remain optional and are not implemented.
-- arpeg currently returns newly triggered expression after its note messages at
-  the same timestamp. Revisit pre-note-on expression separately; the bridge does
-  not guarantee it and does not introduce unbounded same-time feedback.
+- arpeg's Python and Rust players now separate scheduling from MIDI realization.
+  Hosts deliver all same-time hits, observe once, and realize fresh expression
+  before note-on. Note-offs retain their ordering; no same-time feedback loop
+  or automatic observation cadence is introduced. Shared wire traces cover the
+  composition and captured/current expression ownership.
 
 ## Distribution and licenses
 
