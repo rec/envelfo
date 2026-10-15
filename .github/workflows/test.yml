@@ -71,6 +71,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-24.04, windows-2025, macos-15]
+        features: ["", "snapshots"]
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - uses: dtolnay/rust-toolchain@1.85.0
@@ -80,7 +81,7 @@ jobs:
         run: |
           git diff --no-index --exit-code LICENSE crates/envelfo-core/LICENSE
           cargo fmt --all --check
-          cargo clippy --workspace --all-targets --locked -- -D warnings
-          cargo test --workspace --locked
-          cargo test --workspace --locked --release
-          cargo package --manifest-path crates/envelfo-core/Cargo.toml --locked
+          cargo clippy --workspace --all-targets --locked --features "${{ matrix.features }}" -- -D warnings
+          cargo test --workspace --locked --features "${{ matrix.features }}"
+          cargo test --workspace --locked --release --features "${{ matrix.features }}"
+          cargo package --manifest-path crates/envelfo-core/Cargo.toml --locked --features "${{ matrix.features }}"

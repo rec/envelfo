@@ -19,6 +19,8 @@ mod playback;
 pub mod random;
 pub mod sample_hold;
 pub mod signal;
+#[cfg(feature = "snapshots")]
+pub mod snapshot;
 pub mod stages;
 pub mod time;
 

@@ -168,7 +168,7 @@ song beats directly. Hosts normalize authored quantities and supply clocks.
 The core does not parse Pint quantities, acquire tempo or interpret frame counts.
 Commands preserve phase, activation age, pause/reverse and reset behavior;
 failed commands leave the supplied state untouched. `LFOState::clone` provides
-continuation snapshots. A serialized Rust snapshot format is not provided yet.
+in-memory continuation; the optional JSON snapshots below provide persistence.
 
 `Time` holds a reduced signed i64 numerator and positive i64 denominator. It
 accepts integer or rational literals, not floating-point or unit expressions.
@@ -249,10 +249,42 @@ seconds-based delayed capture, Slew during stopped beats, event division/offset,
 curved release and continuation. Native enge event ordering uses exact rational
 times and shared Patch state; only signal evaluation becomes floating point.
 
+### Rust JSON snapshots
+
+Enable the `snapshots` Cargo feature to use `envelfo_core::snapshot::Snapshot`.
+It is off by default, so ordinary library builds do not depend on Serde or JSON.
+Each variant bundles a normalized definition and its complete playback state:
+
+```rust
+use envelfo_core::{lfo::LFO, snapshot::Snapshot, time::Time};
+
+let definition = LFO::new(Time::ONE)?;
+let state = definition.initial(Time::ZERO)?;
+let json = Snapshot::LFO { definition, state }.to_json()?;
+let restored = Snapshot::from_json(&json)?;
+```
+
+Variants cover LFO, Envelope, Stages, SampleHold and Patch. Patch snapshots retain
+child state, signal memory, host input values, stream identity, random words,
+gate counters, pending connections and observation/delivery cursors. Restoring
+does not advance time, draw random values or add an observation. Definitions and
+state are validated together on save and load. Unknown versions, unknown fields,
+invalid indexes, incompatible child states and invalid definitions are rejected.
+
+Version 1 JSON uses `version` and `snapshot` fields, with a `kind` discriminator.
+Rational times are normalized `numerator/denominator` strings. Counters, seeds
+and random words are exact 64-bit JSON integers; external editors must not round
+them through floating point. Signal floats round-trip exactly. No automatic
+version migration or cross-language snapshot interchange is provided.
+
+Hosts still save their clock mappings and external delivery queues, then supply
+the same mapping and observation schedule when resuming. enge audio snapshots
+and arpeg's combined player/bridge snapshots are separate host-owned formats.
+Serialization allocates and is not intended for a real-time callback.
+
 Rust hosts supply clock mappings; a second built-in tempo-map implementation is
-not an extraction requirement. Serialized Rust snapshots, standalone Python
-bindings to Rust, and expression-before-note-on in arpeg are separately scoped
-follow-ups, not unimplemented consumer migration.
+not an extraction requirement. Standalone Python bindings to Rust and
+expression-before-note-on in arpeg remain separately scoped follow-ups.
 
 ## Verification
 
@@ -264,5 +296,6 @@ random words, with explicit tolerances for floating-point signal values.
 Linux, Windows, and macOS checks are release gates, not per-commit jobs.
 The release workflow checks Python 3.13/3.15, repeats the tests against a built
 wheel outside the source tree without NumPy or enge, and tests/packages Rust
-independently in debug and release builds. See the audit for reproduction steps
+independently in debug and release builds, with JSON snapshots disabled and
+enabled. See the audit for reproduction steps
 and explicit exclusions. No release is created or published by these checks.

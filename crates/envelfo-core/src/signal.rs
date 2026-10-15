@@ -5,6 +5,8 @@ use crate::time::Time;
 use std::collections::BTreeMap;
 
 #[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "snapshots", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "snapshots", serde(deny_unknown_fields))]
 pub enum Operator {
     Sum(Vec<String>),
     Product(Vec<String>),

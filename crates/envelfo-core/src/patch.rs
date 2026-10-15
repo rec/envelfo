@@ -56,6 +56,8 @@ impl ClockMapping for Seconds {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "snapshots", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "snapshots", serde(deny_unknown_fields))]
 pub enum Node {
     LFO {
         body: LFO,
@@ -78,30 +80,40 @@ pub struct StreamKeys {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "snapshots", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "snapshots", serde(deny_unknown_fields))]
 pub struct Child {
     pub name: String,
     pub node: Node,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "snapshots", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "snapshots", serde(deny_unknown_fields))]
 pub struct Port {
     pub child: String,
     pub port: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "snapshots", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "snapshots", serde(deny_unknown_fields))]
 pub struct Output {
     pub name: String,
     pub source: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "snapshots", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "snapshots", serde(deny_unknown_fields))]
 pub struct EventOutput {
     pub name: String,
     pub source: Port,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "snapshots", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "snapshots", serde(deny_unknown_fields))]
 pub enum ConnectionAction {
     Start,
     Sample,
@@ -110,6 +122,8 @@ pub enum ConnectionAction {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "snapshots", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "snapshots", serde(deny_unknown_fields))]
 pub struct Connection {
     pub source: Port,
     pub target: String,
@@ -121,6 +135,8 @@ pub struct Connection {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "snapshots", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "snapshots", serde(deny_unknown_fields))]
 pub struct Patch {
     pub children: Vec<Child>,
     pub outputs: Vec<Output>,
@@ -163,6 +179,88 @@ pub struct PatchState {
     gates: Vec<Gate>,
     pending: Vec<Pending>,
     observed_at: Option<Time>,
+}
+
+#[cfg(feature = "snapshots")]
+pub(crate) mod snapshot {
+    use super::*;
+
+    #[derive(serde::Serialize, serde::Deserialize)]
+    #[serde(remote = "PatchState", deny_unknown_fields)]
+    pub(crate) struct State {
+        at: Time,
+        cursor: Time,
+        name: String,
+        seed: u64,
+        children: Vec<Option<ChildState>>,
+        order: Vec<usize>,
+        retained: Vec<Option<f64>>,
+        inputs: Vec<Option<f64>>,
+        gates: Vec<Gate>,
+        pending: Vec<Pending>,
+        observed_at: Option<Time>,
+    }
+
+    pub(crate) fn validate(body: &Patch, state: &PatchState) -> Result<(), Error> {
+        let order = body.validate()?;
+        let invalid = Error::InvalidDefinition("invalid Patch snapshot state");
+        let size = body.children.len();
+        if state.order != order
+            || state.children.len() != size
+            || state.retained.len() != size
+            || state.inputs.len() != size
+            || state.gates.len() != body.connections.len()
+            || state.pending.len() > 4096
+            || state.cursor > state.at
+            || state.observed_at.is_some_and(|t| t > state.at)
+        {
+            return Err(invalid);
+        }
+        for (i, child) in body.children.iter().enumerate() {
+            match (&child.node, &state.children[i]) {
+                (Node::LFO { body, .. }, Some(ChildState::Lfo(s))) => {
+                    crate::lfo::snapshot::validate(body, s)?
+                }
+                (Node::Envelope(body), Some(ChildState::Envelope(s))) => {
+                    crate::envelope::snapshot::validate(body, s)?
+                }
+                (Node::Stages(body), Some(ChildState::Stages(s))) => {
+                    crate::stages::snapshot::validate(body, s)?
+                }
+                (Node::SampleHold(body), Some(ChildState::Sample(s))) => {
+                    crate::sample_hold::snapshot::validate(body, s)?
+                }
+                (Node::Signal(_) | Node::Input, None) => {}
+                _ => return Err(invalid),
+            }
+            if state.retained[i].is_some_and(|v| !v.is_finite())
+                || state.inputs[i].is_some_and(|v| !v.is_finite())
+                || (state.inputs[i].is_some() && child.node != Node::Input)
+                || (state.retained[i].is_some()
+                    && !matches!(&child.node, Node::Signal(o) if o.retained()))
+            {
+                return Err(invalid);
+            }
+        }
+        for (gate, connection) in state.gates.iter().zip(&body.connections) {
+            if gate
+                .count
+                .is_some_and(|n| n >= connection.every.max(connection.offset))
+            {
+                return Err(invalid);
+            }
+        }
+        for pending in &state.pending {
+            let connection = body.connections.get(pending.order).ok_or(invalid)?;
+            if pending.target != body.index(&connection.target)?
+                || pending.action != connection.action
+                || pending.at < state.at
+            {
+                return Err(invalid);
+            }
+        }
+        Ok(())
+    }
 }
 
 impl PatchState {
@@ -868,11 +966,27 @@ impl Patch {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "snapshots", derive(serde::Serialize, serde::Deserialize))]
 enum ChildState {
-    Lfo(LFOState),
-    Envelope(EnvelopeState),
-    Stages(StageState),
-    Sample(SampleState),
+    Lfo(#[cfg_attr(feature = "snapshots", serde(with = "crate::lfo::snapshot::State"))] LFOState),
+    Envelope(
+        #[cfg_attr(
+            feature = "snapshots",
+            serde(with = "crate::envelope::snapshot::State")
+        )]
+        EnvelopeState,
+    ),
+    Stages(
+        #[cfg_attr(feature = "snapshots", serde(with = "crate::stages::snapshot::State"))]
+        StageState,
+    ),
+    Sample(
+        #[cfg_attr(
+            feature = "snapshots",
+            serde(with = "crate::sample_hold::snapshot::State")
+        )]
+        SampleState,
+    ),
 }
 
 impl ChildState {
@@ -891,6 +1005,8 @@ impl ChildState {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "snapshots", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "snapshots", serde(deny_unknown_fields))]
 struct Pending {
     at: Time,
     order: usize,
@@ -899,6 +1015,8 @@ struct Pending {
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
+#[cfg_attr(feature = "snapshots", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "snapshots", serde(deny_unknown_fields))]
 struct Gate {
     count: Option<u64>,
     random: Option<u64>,

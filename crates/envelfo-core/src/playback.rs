@@ -5,6 +5,8 @@ use crate::lfo::{Command, Direction};
 use crate::time::Time;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "snapshots", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "snapshots", serde(deny_unknown_fields))]
 pub(crate) struct Position {
     pub at: Time,
     pub coordinate: Time,
@@ -15,6 +17,14 @@ pub(crate) struct Position {
 }
 
 impl Position {
+    #[cfg(feature = "snapshots")]
+    pub(crate) fn validate_snapshot(&self) -> Result<(), Error> {
+        if self.rate < Time::ZERO || self.age < Time::ZERO {
+            return Err(Error::InvalidDefinition("invalid snapshot position"));
+        }
+        Ok(())
+    }
+
     pub fn new(at: Time, coordinate: Time, rate: Time) -> Self {
         Self {
             at,
