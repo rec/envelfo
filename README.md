@@ -289,6 +289,10 @@ bridge to observe newly triggered expression before note-on.
 
 ## Verification
 
+The [Rust performance audit](doc/performance.md) records repeatable allocation
+and timing benchmarks, measured optimizations, and their limits. Run
+`cargo bench -p envelfo-core --bench patch --locked` to repeat the measurements.
+
 Run `uv run pytest` for the reference tests and the language-neutral cases in
 `conformance/envelfo-runtime.json`, `conformance/envelfo-patch.json` and
 `conformance/envelfo-host.json` and `conformance/envelfo-streams.json`. These

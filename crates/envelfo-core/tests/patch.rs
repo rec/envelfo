@@ -510,6 +510,88 @@ fn zero_delay_cues_execute_in_connection_order_and_route_cascaded_done_once() {
 }
 
 #[test]
+fn observation_failure_after_routing_rolls_back_streams_and_retained_signals() {
+    for overflowing in [false, true] {
+        let mut body = clock_patch(ConnectionAction::Sample);
+        body.connections[0].probability = 0.5;
+        body.connections[0].delay = t(1, 20);
+        body.children.push(child("host", Node::Input));
+        if overflowing {
+            body.children.push(child(
+                "slew",
+                Node::Signal(Operator::Slew {
+                    input: "host".into(),
+                    rise: 1.0,
+                    fall: 1.0,
+                    initial: None,
+                }),
+            ));
+            body.children.push(child(
+                "overflow",
+                Node::Signal(Operator::Affine {
+                    input: "slew".into(),
+                    scale: 2.0,
+                    offset: 0.0,
+                }),
+            ));
+            body.outputs.push(output("overflow", "overflow"));
+        }
+        let keys = envelfo_core::patch::StreamKeys {
+            samples: [("held".into(), 0)].into(),
+            connections: vec![0],
+        };
+        let mut state = body
+            .initial(Time::ZERO, "patch", 0, Some(&keys), &Seconds)
+            .unwrap();
+        let initial = body
+            .child_value(&state, "held", Time::ZERO, &Seconds)
+            .unwrap()
+            .value;
+        if overflowing {
+            body.set_input(&mut state, "host", f64::MAX).unwrap();
+        }
+        let saved = state.clone();
+        assert_eq!(
+            body.advance(
+                &mut state,
+                Time::from_integer(2),
+                Time::from_integer(3),
+                &Seconds
+            ),
+            Err(if overflowing {
+                Error::InvalidSignal
+            } else {
+                Error::InvalidDefinition("host signal has not been supplied")
+            })
+        );
+        assert_eq!(state, saved);
+        let mut expected = saved;
+        body.set_input(&mut expected, "host", 0.5).unwrap();
+        body.set_input(&mut state, "host", 0.5).unwrap();
+        let result = body
+            .advance(
+                &mut state,
+                Time::from_integer(2),
+                Time::from_integer(3),
+                &Seconds,
+            )
+            .unwrap();
+        assert_eq!(
+            result,
+            body.advance(
+                &mut expected,
+                Time::from_integer(2),
+                Time::from_integer(3),
+                &Seconds
+            )
+            .unwrap()
+        );
+        assert_ne!(result.values["value"], initial);
+        assert_eq!(state, expected);
+    }
+}
+
+#[test]
 fn host_clock_failure_rolls_back_deliveries_and_random_draws() {
     struct Failing;
     impl ClockMapping for Failing {
