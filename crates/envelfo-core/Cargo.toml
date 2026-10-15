@@ -6,9 +6,14 @@ rust-version = "1.85"
 description = "Exact control playback without Python or an audio engine"
 license = "MIT"
 
+[features]
+snapshots = ["dep:serde", "dep:serde_json"]
+
 [dependencies]
 num-rational = { version = "0.4", default-features = false, features = ["std"] }
 sha2 = "0.10.9"
+serde = { version = "1", features = ["derive"], optional = true }
+serde_json = { version = "1", optional = true }
 
 [dev-dependencies]
 serde_json = { version = "1", features = ["preserve_order"] }
