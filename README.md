@@ -283,8 +283,9 @@ and arpeg's combined player/bridge snapshots are separate host-owned formats.
 Serialization allocates and is not intended for a real-time callback.
 
 Rust hosts supply clock mappings; a second built-in tempo-map implementation is
-not an extraction requirement. Standalone Python bindings to Rust and
-expression-before-note-on in arpeg remain separately scoped follow-ups.
+not an extraction requirement. Standalone Python bindings to Rust remain optional.
+arpeg now provides scheduling/realization phases in Python and Rust, allowing its
+bridge to observe newly triggered expression before note-on.
 
 ## Verification
 
