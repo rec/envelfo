@@ -581,9 +581,9 @@
       "name": "phase continues across stepped rate changes and zero rate",
       "definition": {
         "rate": "1/4",
-        "waveform": "triangle",
         "reset": "free",
-        "scope": "instrument"
+        "scope": "instrument",
+        "shape": "triangle"
       },
       "events": [
         {
@@ -595,7 +595,7 @@
         {
           "at": "3/2",
           "ordinal": 0,
-          "action": "trigger"
+          "action": "note_on"
         },
         {
           "at": "2",
@@ -641,15 +641,15 @@
       "name": "phase advances during delay and fade follows reset",
       "definition": {
         "rate": "1/4",
-        "waveform": "triangle",
         "delay": "1",
-        "fade_in": "2"
+        "fade_in": "2",
+        "shape": "triangle"
       },
       "events": [
         {
           "at": "4",
           "ordinal": 0,
-          "action": "trigger"
+          "action": "note_on"
         }
       ],
       "observations": [
@@ -698,14 +698,14 @@
         "scope": "instrument",
         "rate": "1/4",
         "phase": "1/4",
-        "waveform": "triangle",
-        "reset": "transport"
+        "reset": "transport",
+        "shape": "triangle"
       },
       "events": [
         {
           "at": "1",
           "ordinal": 0,
-          "action": "trigger"
+          "action": "note_on"
         },
         {
           "at": "2",
@@ -745,8 +745,8 @@
       "definition": {
         "rate": "1/4",
         "reset": "free",
-        "waveform": "square",
-        "duty_cycle": "1/2"
+        "duty_cycle": "1/2",
+        "shape": "square"
       },
       "events": [
         {
@@ -774,8 +774,8 @@
       "name": "rational duty transition is exact",
       "definition": {
         "rate": "1",
-        "waveform": "square",
-        "duty_cycle": "1/10"
+        "duty_cycle": "1/10",
+        "shape": "square"
       },
       "events": [],
       "observations": [
@@ -901,7 +901,7 @@
   ],
   "invalid_documents": [
     {
-      "kind": "envelope",
+      "kind": "envelfo",
       "body": {
         "segments": [],
         "release": [
@@ -909,11 +909,12 @@
             "duration": "0 s",
             "to": 0
           }
-        ]
+        ],
+        "kind": "envelope"
       }
     },
     {
-      "kind": "envelope",
+      "kind": "envelfo",
       "body": {
         "segments": [
           {
@@ -926,11 +927,12 @@
             "duration": "0 s",
             "to": 0
           }
-        ]
+        ],
+        "kind": "envelope"
       }
     },
     {
-      "kind": "envelope",
+      "kind": "envelfo",
       "body": {
         "segments": [
           {
@@ -943,11 +945,12 @@
             "duration": "0 s",
             "to": 0
           }
-        ]
+        ],
+        "kind": "envelope"
       }
     },
     {
-      "kind": "envelope",
+      "kind": "envelfo",
       "body": {
         "segments": [
           {
@@ -960,11 +963,12 @@
             "duration": "0 s",
             "to": 0
           }
-        ]
+        ],
+        "kind": "envelope"
       }
     },
     {
-      "kind": "envelope",
+      "kind": "envelfo",
       "body": {
         "segments": [
           {
@@ -981,59 +985,68 @@
         "loop": [
           0,
           1
-        ]
+        ],
+        "kind": "envelope"
       }
     },
     {
-      "kind": "lfo",
+      "kind": "envelfo",
       "body": {
-        "rate": "-1"
+        "rate": "-1",
+        "kind": "lfo"
       }
     },
     {
-      "kind": "lfo",
-      "body": {
-        "rate": "1",
-        "phase": "1"
-      }
-    },
-    {
-      "kind": "lfo",
+      "kind": "envelfo",
       "body": {
         "rate": "1",
-        "duty_cycle": "2"
+        "phase": "1",
+        "kind": "lfo"
       }
     },
     {
-      "kind": "lfo",
+      "kind": "envelfo",
       "body": {
         "rate": "1",
-        "waveform": "random"
+        "duty_cycle": "2",
+        "kind": "lfo"
       }
     },
     {
-      "kind": "lfo",
+      "kind": "envelfo",
       "body": {
         "rate": "1",
-        "delay": "-1"
+        "kind": "lfo",
+        "shape": "random"
       }
     },
     {
-      "kind": "lfo",
+      "kind": "envelfo",
       "body": {
-        "rate": "1/0"
+        "rate": "1",
+        "delay": "-1",
+        "kind": "lfo"
       }
     },
     {
-      "kind": "lfo",
+      "kind": "envelfo",
       "body": {
-        "rate": 0.1
+        "rate": "1/0",
+        "kind": "lfo"
       }
     },
     {
-      "kind": "lfo",
+      "kind": "envelfo",
       "body": {
-        "rate": true
+        "rate": 0.1,
+        "kind": "lfo"
+      }
+    },
+    {
+      "kind": "envelfo",
+      "body": {
+        "rate": true,
+        "kind": "lfo"
       }
     }
   ]

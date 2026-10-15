@@ -55,25 +55,6 @@ def transform_value(
     return value
 
 
-def lfo_definition(definition: envelfo.EnveLFO) -> lfo.LFO:
-    body = definition
-    if not isinstance(body, envelfo.LFO):
-        raise ValueError('envelfo is not an LFO')
-    if isinstance(body.rate, envelfo.ParameterReference):
-        raise ValueError('LFO rate has an unresolved public parameter')
-    return lfo.LFO(
-        clock=definition.clock,
-        scope=definition.scope,
-        rate=body.rate,
-        phase=body.phase,
-        reset=body.reset,
-        waveform=body.shape,
-        duty_cycle=body.duty_cycle,
-        delay=body.delay,
-        fade_in=body.fade_in,
-    )
-
-
 def initial_envelfo(
     definition: envelfo.EnveLFO, at: Fraction, *, seed: int = 0
 ) -> envelfo.EnvelfoState:
@@ -165,14 +146,7 @@ def envelfo_at(
             )
         coordinate = _coordinate_at(position, at)
         age = _age_at(position, at)
-        if age < definition.delay:
-            weight = 0.0
-        elif definition.fade_in:
-            weight = float(
-                min(Fraction(1), (age - definition.delay) / definition.fade_in)
-            )
-        else:
-            weight = 1.0
+        weight = lfo.activation_weight(age, definition.delay, definition.fade_in)
         return envelfo.EnvelfoValue(
             value=definition.center
             + definition.depth
@@ -1123,12 +1097,7 @@ def _stage_value(
     if isinstance(stage, envelfo.LFO):
         phase = coordinate % 1
         age = _age_at(position, at)
-        if age < stage.delay:
-            weight = 0.0
-        elif stage.fade_in:
-            weight = float(min(Fraction(1), (age - stage.delay) / stage.fade_in))
-        else:
-            weight = 1.0
+        weight = lfo.activation_weight(age, stage.delay, stage.fade_in)
         value = stage.center + stage.depth * weight * oscillator.shape_value(
             stage.shape, phase, stage.duty_cycle
         )

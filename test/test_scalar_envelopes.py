@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 import tomlkit
 from pydantic import ValidationError
-from ufor import envelfo, envelope, lfo, segments
+from ufor import envelfo, envelope, segments
 from ufor.base import Model
 from ufor.codec import parse_score, score_toml
 from ufor.envelfo import LFO, EnvelfoScore, Envelope
@@ -25,14 +25,17 @@ class EnvelopeCase(Model):
     observations: list[EnvelopeObservation]
 
 
-class LFOObservation(lfo.LFOValue):
+class LFOObservation(Model):
     at: Fraction
+    phase: Fraction
+    value: float
+    weight: float
 
 
 class LFOCase(Model):
     name: str
-    definition: lfo.LFO
-    events: list[lfo.LFOEvent]
+    definition: envelfo.LFO
+    events: list[envelfo.EnvelfoEvent]
     observations: list[LFOObservation]
 
 
@@ -70,18 +73,26 @@ def check_envelope(case: EnvelopeCase, extra_observations: bool) -> None:
 
 
 def check_lfo(case: LFOCase, extra_observations: bool) -> None:
-    state = lfo.initial_lfo(case.definition, Fraction(0))
+    state = runtime.initial_envelfo(case.definition, Fraction(0))
     remaining = iter(case.events)
     event = next(remaining, None)
     for probe in case.observations:
         while event is not None and event.at <= probe.at:
             if extra_observations:
-                lfo.lfo_at(case.definition, state, (state.at + event.at) / 2)
-                state = lfo.LFOState.model_validate_json(state.model_dump_json())
-            state = lfo.lfo_event(case.definition, state, event)
+                runtime.envelfo_at(
+                    case.definition, state, (state.runtime.at + event.at) / 2
+                )
+                state = envelfo.EnvelfoState.model_validate_json(
+                    state.model_dump_json()
+                )
+            state = runtime.envelfo_event(case.definition, state, event)
             event = next(remaining, None)
-        actual = lfo.lfo_at(case.definition, state, probe.at)
-        assert actual.phase == probe.phase
+        actual = runtime.envelfo_at(case.definition, state, probe.at)
+        assert isinstance(state.runtime, envelfo.LFOState)
+        position = state.runtime.position
+        assert (
+            position.coordinate + position.rate * (probe.at - position.at)
+        ) % 1 == probe.phase
         assert actual.value == pytest.approx(probe.value, abs=TOLERANCE, rel=0)
         assert actual.weight == pytest.approx(probe.weight, abs=TOLERANCE, rel=0)
 
@@ -153,11 +164,11 @@ def test_independent_instances_and_replay_for_seeking() -> None:
     with pytest.raises(ValueError, match='replay'):
         runtime.envelfo_at(definition, released, Fraction(1, 2))
     assert runtime.envelfo_at(definition, active, Fraction(1, 2)).value == 0.25
-    oscillator = lfo.LFO(rate=Fraction(1, 4))
-    first = lfo.initial_lfo(oscillator, Fraction(0))
-    second = lfo.initial_lfo(oscillator, Fraction(1))
-    assert lfo.phase_at(first, Fraction(2)) == Fraction(1, 2)
-    assert lfo.phase_at(second, Fraction(2)) == Fraction(1, 4)
+    oscillator = envelfo.LFO(rate=Fraction(1, 4))
+    first = runtime.initial_envelfo(oscillator, Fraction(0))
+    second = runtime.initial_envelfo(oscillator, Fraction(1))
+    assert runtime.envelfo_at(oscillator, first, Fraction(1)).value == 1
+    assert runtime.envelfo_at(oscillator, second, Fraction(1)).value == 0
 
 
 def test_equal_time_ordinals_are_strict_for_both_generators() -> None:
@@ -171,20 +182,22 @@ def test_equal_time_ordinals_are_strict_for_both_generators() -> None:
     ]:
         with pytest.raises(ValueError, match='order'):
             runtime.envelfo_event(definition, state, invalid)
-    oscillator = lfo.LFO(rate=Fraction(1))
-    lfo_state = lfo.initial_lfo(oscillator, Fraction(0))
-    change = lfo.LFOEvent(at=Fraction(1), ordinal=0, action='rate', rate=Fraction(2))
-    lfo_state = lfo.lfo_event(oscillator, lfo_state, change)
+    oscillator = envelfo.LFO(rate=Fraction(1))
+    lfo_state = runtime.initial_envelfo(oscillator, Fraction(0))
+    change = envelfo.EnvelfoEvent(
+        at=Fraction(1), ordinal=0, action='rate', rate=Fraction(2)
+    )
+    lfo_state = runtime.envelfo_event(oscillator, lfo_state, change)
     with pytest.raises(ValueError, match='order'):
-        lfo.lfo_event(oscillator, lfo_state, change)
+        runtime.envelfo_event(oscillator, lfo_state, change)
     with pytest.raises(ValueError, match='replay'):
-        lfo.lfo_at(oscillator, lfo_state, Fraction(0))
+        runtime.envelfo_at(oscillator, lfo_state, Fraction(0))
 
 
 def test_rate_event_payload_is_required_only_for_rate_changes() -> None:
     for payload in [{'action': 'rate'}, {'action': 'reset', 'rate': '1'}]:
         with pytest.raises(ValidationError, match='rate events'):
-            lfo.LFOEvent.model_validate({'at': '0', 'ordinal': 0, **payload})
+            envelfo.EnvelfoEvent.model_validate({'at': '0', 'ordinal': 0, **payload})
 
 
 def test_beat_controls_follow_supplied_tempo_positions_without_reset() -> None:
@@ -195,20 +208,24 @@ def test_beat_controls_follow_supplied_tempo_positions_without_reset() -> None:
             'release': [{'duration': '0 beat', 'to': 0}],
         }
     )
-    oscillator = lfo.LFO.model_validate({'clock': 'beats', 'rate': '1/4'})
+    oscillator = envelfo.LFO.model_validate(
+        {'clock': 'beats', 'rate': '1/4', 'shape': 'triangle'}
+    )
     state = runtime.initial_envelfo(definition, Fraction(0))
     state = runtime.envelfo_event(
         definition,
         state,
         envelfo.EnvelfoEvent(at=Fraction(0), ordinal=0, action='note_on'),
     )
-    phase = lfo.initial_lfo(oscillator, Fraction(0))
+    phase = runtime.initial_envelfo(oscillator, Fraction(0))
     # Host positions for 120 BPM until second 1, then 60 BPM.
     for seconds, beats in [('0', 0), ('1/2', 1), ('1', 2), ('2', 3)]:
         at = Fraction(beats)
         expected = beats / 4
         assert runtime.envelfo_at(definition, state, at).value == expected, seconds
-        assert lfo.phase_at(phase, at) == Fraction(beats, 4), seconds
+        assert runtime.envelfo_at(oscillator, phase, at).value == (
+            beats - 1 if beats <= 2 else 3 - beats
+        ), seconds
 
 
 CASES = json.loads(
@@ -248,7 +265,7 @@ def test_lfo_conformance(case: LFOCase, extra_observations: bool) -> None:
         name='lfo',
         title=case.name,
         body=LFO(
-            shape=case.definition.waveform,
+            shape=case.definition.shape,
             rate=case.definition.rate,
             phase=case.definition.phase,
             duty_cycle=case.definition.duty_cycle,
@@ -278,5 +295,6 @@ def test_shape_conformance(case: dict[str, str | float]) -> None:
 
 @pytest.mark.parametrize('case', CASES['invalid_documents'])
 def test_invalid_modulation_documents(case: dict[str, object]) -> None:
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError) as error:
         parse_score(tomlkit.dumps({'name': 'invalid', 'title': 'Invalid', **case}))
+    assert any('body' in e['loc'] for e in error.value.errors())
