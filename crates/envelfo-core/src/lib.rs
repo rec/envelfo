@@ -41,6 +41,7 @@ pub enum Error {
     EventOrder,
     Unsupported(&'static str),
     Capacity,
+    PendingCapacity,
     InvalidSignal,
 }
 
@@ -55,6 +56,7 @@ impl std::fmt::Display for Error {
             Self::TimeReversed => "query precedes current state; replay events to seek",
             Self::EventOrder => "commands must increase in time and ordinal order",
             Self::Capacity => "Envelfo event capacity exceeded",
+            Self::PendingCapacity => "Delayed Envelfo event capacity exceeded",
             Self::InvalidSignal => "Patch signal is not finite",
         })
     }

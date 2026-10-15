@@ -260,7 +260,9 @@ fn patch_host_can_advance_a_waiting_child() {
             event_outputs: vec![],
             connections: vec![],
         };
-        let mut state = body.initial(Time::ZERO, "gesture", 0, &Seconds).unwrap();
+        let mut state = body
+            .initial(Time::ZERO, "gesture", 0, None, &Seconds)
+            .unwrap();
         body.command(
             &mut state,
             "child",
@@ -270,6 +272,7 @@ fn patch_host_can_advance_a_waiting_child() {
                 command: ChildCommand::Advance,
             },
             &Seconds,
+            true,
         )
         .unwrap();
         let mut state = state.clone();

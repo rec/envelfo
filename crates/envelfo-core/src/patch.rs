@@ -14,7 +14,7 @@
 //!     outputs: vec![Output { name: "value".into(), source: "wave".into() }],
 //!     event_outputs: vec![], connections: vec![],
 //! };
-//! let mut state = patch.initial(Time::ZERO, "gesture", 0, &Seconds)?;
+//! let mut state = patch.initial(Time::ZERO, "gesture", 0, None, &Seconds)?;
 //! let result = patch.advance(&mut state, Time::new(1, 4)?, Time::new(3, 10)?, &Seconds)?;
 //! assert_eq!(result.values["value"], 0.0);
 //! # Ok(())
@@ -39,29 +39,42 @@ use crate::time::Time;
 /// The inverse returns the first host time at which a local boundary is reached.
 /// Stopped transport may leave future local boundaries unreachable.
 pub trait ClockMapping {
-    fn local_time(&self, seconds: Time) -> Result<Time, Error>;
-    fn host_time(&self, local: Time) -> Result<Option<Time>, Error>;
+    fn local_time(&self, child: &str, seconds: Time) -> Result<Time, Error>;
+    fn host_time(&self, child: &str, local: Time) -> Result<Option<Time>, Error>;
 }
 
 #[derive(Clone, Copy, Debug)]
 pub struct Seconds;
 
 impl ClockMapping for Seconds {
-    fn local_time(&self, seconds: Time) -> Result<Time, Error> {
+    fn local_time(&self, _: &str, seconds: Time) -> Result<Time, Error> {
         Ok(seconds)
     }
-    fn host_time(&self, local: Time) -> Result<Option<Time>, Error> {
+    fn host_time(&self, _: &str, local: Time) -> Result<Option<Time>, Error> {
         Ok(Some(local))
     }
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Node {
-    LFO { body: LFO, markers: Vec<Marker> },
+    LFO {
+        body: LFO,
+        markers: Vec<Marker>,
+    },
     Envelope(Envelope),
     Stages(Stages),
     SampleHold(SampleHold),
     Signal(Operator),
+    /// A host-owned signal, for example an instrument-scoped generator.
+    Input,
+}
+
+/// Prepared stream identities let hosts preserve authored random streams when
+/// several independently named graphs are materialized into one scheduler.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct StreamKeys {
+    pub samples: BTreeMap<String, u64>,
+    pub connections: Vec<u64>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -140,11 +153,13 @@ pub struct PatchAdvance {
 #[derive(Clone, Debug, PartialEq)]
 pub struct PatchState {
     at: Time,
+    cursor: Time,
     name: String,
     seed: u64,
     children: Vec<Option<ChildState>>,
     order: Vec<usize>,
     retained: Vec<Option<f64>>,
+    inputs: Vec<Option<f64>>,
     gates: Vec<Gate>,
     pending: Vec<Pending>,
     observed_at: Option<Time>,
@@ -169,34 +184,58 @@ impl Patch {
         at: Time,
         name: &str,
         seed: u64,
+        keys: Option<&StreamKeys>,
         clock: &impl ClockMapping,
     ) -> Result<PatchState, Error> {
         let order = self.validate()?;
-        let local = clock.local_time(at)?;
+        if keys.is_some_and(|k| k.connections.len() != self.connections.len()) {
+            return Err(Error::InvalidDefinition("connection stream count mismatch"));
+        }
         let children = self
             .children
             .iter()
             .map(|child| {
+                let local = clock.local_time(&child.name, at)?;
                 Ok(match &child.node {
                     Node::LFO { body, .. } => Some(ChildState::Lfo(body.initial(local)?)),
                     Node::Envelope(body) => Some(ChildState::Envelope(body.initial(local)?)),
                     Node::Stages(body) => Some(ChildState::Stages(body.initial(local)?)),
-                    Node::SampleHold(body) => Some(ChildState::Sample(body.initial(
-                        local,
-                        seed ^ stream_key(0, &format!("patch-{name}-{}:sample-hold", child.name)),
-                    )?)),
-                    Node::Signal(_) => None,
+                    Node::SampleHold(body) => Some(ChildState::Sample(
+                        body.initial(
+                            local,
+                            seed ^ keys
+                                .and_then(|k| k.samples.get(&child.name))
+                                .copied()
+                                .unwrap_or_else(|| {
+                                    stream_key(
+                                        0,
+                                        &format!("patch-{name}-{}:sample-hold", child.name),
+                                    )
+                                }),
+                        )?,
+                    )),
+                    Node::Signal(_) | Node::Input => None,
                 })
             })
             .collect::<Result<_, Error>>()?;
         Ok(PatchState {
             at,
+            cursor: at,
             name: name.into(),
             seed,
             children,
             order,
             retained: vec![None; self.children.len()],
-            gates: vec![Gate::default(); self.connections.len()],
+            inputs: vec![None; self.children.len()],
+            gates: self
+                .connections
+                .iter()
+                .enumerate()
+                .map(|(i, _)| Gate {
+                    count: None,
+                    random: keys.map(|k| seed ^ k.connections[i]),
+                })
+                .collect(),
             pending: vec![],
             observed_at: None,
         })
@@ -223,11 +262,18 @@ impl Patch {
         let mut next = state.clone();
         let mut events = self.run(&mut next, at, true, clock)?;
         next.at = at;
-        let local = clock.local_time(at)?;
         let mut signals = BTreeMap::new();
         for (index, child) in self.children.iter().enumerate() {
             if let Some(current) = &next.children[index] {
+                let local = clock.local_time(&child.name, at)?;
                 signals.insert(child.name.clone(), self.value(index, current, local)?);
+            } else if child.node == Node::Input {
+                signals.insert(
+                    child.name.clone(),
+                    next.inputs[index].ok_or(Error::InvalidDefinition(
+                        "host signal has not been supplied",
+                    ))?,
+                );
             }
         }
         let seconds = match next.observed_at {
@@ -278,6 +324,7 @@ impl Patch {
         target: &str,
         event: &ChildEvent,
         clock: &impl ClockMapping,
+        inclusive: bool,
     ) -> Result<Vec<OutputEvent>, Error> {
         if event.at < state.at {
             return Err(Error::TimeReversed);
@@ -286,10 +333,66 @@ impl Patch {
         let mut next = state.clone();
         let mut emitted = self.run(&mut next, event.at, false, clock)?;
         self.deliver(&mut next, target, event, clock, &mut emitted)?;
-        emitted.extend(self.run(&mut next, event.at, true, clock)?);
+        if inclusive {
+            emitted.extend(self.run(&mut next, event.at, true, clock)?);
+        }
         next.at = event.at;
         *state = next;
         Ok(emitted)
+    }
+
+    /// Settle events without adding a signal observation. Hosts use an exclusive
+    /// limit before a same-time command batch and an inclusive limit afterwards.
+    pub fn settle(
+        &self,
+        state: &mut PatchState,
+        at: Time,
+        inclusive: bool,
+        clock: &impl ClockMapping,
+    ) -> Result<Vec<OutputEvent>, Error> {
+        if at < state.at {
+            return Err(Error::TimeReversed);
+        }
+        let mut next = state.clone();
+        let events = self.run(&mut next, at, inclusive, clock)?;
+        next.at = at;
+        *state = next;
+        Ok(events)
+    }
+
+    pub fn set_input(&self, state: &mut PatchState, child: &str, value: f64) -> Result<(), Error> {
+        let index = self.index(child)?;
+        if self.children[index].node != Node::Input || !value.is_finite() {
+            return Err(Error::InvalidSignal);
+        }
+        state.inputs[index] = Some(value);
+        Ok(())
+    }
+
+    /// Observe an executable child without changing retained operators or edges.
+    pub fn child_value(
+        &self,
+        state: &PatchState,
+        child: &str,
+        at: Time,
+        clock: &impl ClockMapping,
+    ) -> Result<crate::lfo::Value, Error> {
+        let index = self.index(child)?;
+        let local = clock.local_time(child, at)?;
+        match (&self.children[index].node, &state.children[index]) {
+            (Node::LFO { body, .. }, Some(ChildState::Lfo(s))) => body.value(s, local),
+            (Node::Envelope(body), Some(ChildState::Envelope(s))) => body.value(s, local),
+            (Node::Stages(body), Some(ChildState::Stages(s))) => body.value(s, local),
+            (Node::SampleHold(body), Some(ChildState::Sample(s))) => body.value(s, local),
+            _ => Err(Error::Unsupported("child is not an executable generator")),
+        }
+    }
+
+    pub fn next_ordinal(&self, state: &PatchState, child: &str) -> Result<u64, Error> {
+        state.children[self.index(child)?]
+            .as_ref()
+            .ok_or(Error::Unsupported("child is not an executable generator"))?
+            .next_ordinal()
     }
 
     fn validate(&self) -> Result<Vec<usize>, Error> {
@@ -307,7 +410,7 @@ impl Patch {
                 Node::LFO { body, markers } => {
                     body.validate()?;
                     validate_markers(markers, false)?;
-                    if body.driver != Driver::Elapsed {
+                    if body.driver != Driver::Elapsed && !markers.is_empty() {
                         return Err(Error::InvalidDefinition(
                             "Patch LFO requires elapsed position",
                         ));
@@ -324,6 +427,7 @@ impl Patch {
                 Node::Stages(body) => body.validate()?,
                 Node::SampleHold(body) => body.validate()?,
                 Node::Signal(body) => body.validate()?,
+                Node::Input => {}
             }
         }
         let mut remaining = vec![0_usize; self.children.len()];
@@ -522,7 +626,7 @@ impl Patch {
             let identity = format!("{target_name}:{command}");
             if state.gates[order].forward(connection, state.seed, &identity) {
                 if state.pending.len() == 4096 {
-                    return Err(Error::Capacity);
+                    return Err(Error::PendingCapacity);
                 }
                 state.pending.push(Pending {
                     at: seconds.checked_add(connection.delay)?,
@@ -543,7 +647,7 @@ impl Patch {
         clock: &impl ClockMapping,
         emitted: &mut Vec<OutputEvent>,
     ) -> Result<(), Error> {
-        let local = clock.local_time(event.at)?;
+        let local = clock.local_time(&self.children[target].name, event.at)?;
         let current = state.children[target].as_mut().ok_or(Error::Unsupported(
             "commands require an executable Patch child",
         ))?;
@@ -596,7 +700,7 @@ impl Patch {
                 event.at
             } else {
                 clock
-                    .host_time(output.at)?
+                    .host_time(&self.children[target].name, output.at)?
                     .ok_or(Error::InvalidDefinition("local event has no host time"))?
             };
             self.route(state, target, output, seconds, emitted)?;
@@ -621,14 +725,14 @@ impl Patch {
                 .filter(|e| within(e.at))
                 .map(|e| e.at)
                 .min();
-            let local_limit = clock.local_time(limit)?;
             let mut lfos = vec![];
             for (index, child) in self.children.iter().enumerate() {
+                let local_limit = clock.local_time(&child.name, limit)?;
                 match (&child.node, &state.children[index]) {
                     (Node::Stages(body), Some(ChildState::Stages(current))) => {
-                        if let Some(event) = body.next_event(current, local_limit, inclusive)? {
+                        if let Some(event) = body.next_event(current, local_limit, true)? {
                             let seconds = clock
-                                .host_time(event.at)?
+                                .host_time(&child.name, event.at)?
                                 .ok_or(Error::InvalidDefinition("local event has no host time"))?;
                             if seconds >= state.at && within(seconds) {
                                 next = Some(next.map_or(seconds, |n| n.min(seconds)));
@@ -638,7 +742,7 @@ impl Patch {
                     (Node::LFO { body, markers }, Some(ChildState::Lfo(current)))
                         if !markers.is_empty() =>
                     {
-                        let previous = clock.local_time(state.at)?;
+                        let previous = clock.local_time(&child.name, state.cursor)?;
                         for marker in markers {
                             // Host-time inclusion is checked below, including stopped clocks.
                             let Some(local) = body.next_marker(
@@ -652,7 +756,7 @@ impl Patch {
                                 continue;
                             };
                             let seconds = clock
-                                .host_time(local)?
+                                .host_time(&child.name, local)?
                                 .ok_or(Error::InvalidDefinition("local marker has no host time"))?;
                             if within(seconds) {
                                 lfos.push((seconds, index, marker.name.clone(), local));
@@ -666,11 +770,11 @@ impl Patch {
             let Some(seconds) = next else {
                 break;
             };
-            let local = clock.local_time(seconds)?;
             for (index, child) in self.children.iter().enumerate() {
                 if let (Node::Stages(body), Some(ChildState::Stages(current))) =
                     (&child.node, &mut state.children[index])
                 {
+                    let local = clock.local_time(&child.name, seconds)?;
                     let result = body.advance(current, local, None)?;
                     processed += result.events.len();
                     for event in result.events {
@@ -742,13 +846,14 @@ impl Patch {
                 return Err(Error::Capacity);
             }
             state.at = seconds;
+            state.cursor = seconds;
         }
         if inclusive {
-            let local = clock.local_time(limit)?;
             for (index, child) in self.children.iter().enumerate() {
                 if let (Node::Stages(body), Some(ChildState::Stages(current))) =
                     (&child.node, &mut state.children[index])
                 {
+                    let local = clock.local_time(&child.name, limit)?;
                     let result = body.advance(current, local, None)?;
                     debug_assert!(
                         result.events.is_empty(),
@@ -756,6 +861,7 @@ impl Patch {
                     );
                 }
             }
+            state.cursor = limit;
         }
         Ok(emitted)
     }

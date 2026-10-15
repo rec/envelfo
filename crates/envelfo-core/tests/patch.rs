@@ -12,10 +12,78 @@ use envelfo_core::stages::{Action, Body, Stage, Stages, Transition};
 use envelfo_core::time::Time;
 
 #[test]
+fn independently_clocked_children_route_in_host_time_across_command_phases() {
+    struct Clocks;
+    impl ClockMapping for Clocks {
+        fn local_time(&self, child: &str, at: Time) -> Result<Time, Error> {
+            if child == "clock" {
+                at.checked_mul(Time::from_integer(2))
+            } else {
+                Ok(at)
+            }
+        }
+        fn host_time(&self, child: &str, at: Time) -> Result<Option<Time>, Error> {
+            Ok(Some(if child == "clock" {
+                at.checked_div(Time::from_integer(2))?
+            } else {
+                at
+            }))
+        }
+    }
+    let body = clock_patch(ConnectionAction::Sample);
+    let mut state = body
+        .initial(Time::ZERO, "gesture", 0, None, &Clocks)
+        .unwrap();
+    let before = body
+        .advance(&mut state, Time::ZERO, t(1, 8), &Clocks)
+        .unwrap();
+    body.settle(&mut state, t(1, 8), false, &Clocks).unwrap();
+    let snapshot = state.clone();
+    let after = body.advance(&mut state, t(1, 8), t(1, 4), &Clocks).unwrap();
+    assert_eq!(after.events[0].at, t(1, 8));
+    assert_ne!(after.values["value"], before.values["value"]);
+    let mut restored = snapshot;
+    assert_eq!(
+        body.advance(&mut restored, t(1, 8), t(1, 4), &Clocks)
+            .unwrap(),
+        after
+    );
+}
+
+#[test]
+fn prepared_random_keys_and_host_inputs_preserve_stream_identity() {
+    let mut body = clock_patch(ConnectionAction::Sample);
+    body.children.push(Child {
+        name: "host".into(),
+        node: Node::Input,
+    });
+    body.outputs.push(Output {
+        name: "host".into(),
+        source: "host".into(),
+    });
+    let keys = envelfo_core::patch::StreamKeys {
+        samples: [("held".into(), 123)].into(),
+        connections: vec![456],
+    };
+    let mut state = body
+        .initial(Time::ZERO, "graph", 17, Some(&keys), &Seconds)
+        .unwrap();
+    body.set_input(&mut state, "host", 0.75).unwrap();
+    let result = observe(&body, &mut state, Time::ZERO);
+    let mut random = 17 ^ 123;
+    let expected = (random_word(&mut random) >> 11) as f64 / (1_u64 << 53) as f64;
+    assert_eq!(result.values["value"], expected);
+    assert_eq!(result.values["host"], 0.75);
+    assert!(body.set_input(&mut state, "clock", 1.0).is_err());
+}
+
+#[test]
 fn delayed_random_samples_and_cloned_continuation_keep_exact_deliveries() {
     let mut body = clock_patch(ConnectionAction::Sample);
     body.connections[0].delay = t(1, 10);
-    let mut state = body.initial(Time::ZERO, "gesture", 81, &Seconds).unwrap();
+    let mut state = body
+        .initial(Time::ZERO, "gesture", 81, None, &Seconds)
+        .unwrap();
     let initial = state.clone();
     let first = body
         .advance(&mut state, t(1, 4), t(3, 10), &Seconds)
@@ -48,7 +116,9 @@ fn every_offset_and_chance_gates_match_independent_portable_streams() {
             connection.every = every;
             connection.offset = offset;
             connection.probability = probability;
-            let mut state = body.initial(Time::ZERO, "patch", 19, &Seconds).unwrap();
+            let mut state = body
+                .initial(Time::ZERO, "patch", 19, None, &Seconds)
+                .unwrap();
             let mut sample_random = 19 ^ stream_key(0, "patch-patch-held:sample-hold");
             let mut expected =
                 (random_word(&mut sample_random) >> 11) as f64 / (1_u64 << 53) as f64;
@@ -94,7 +164,9 @@ fn natural_connections_are_partition_independent_without_inventing_observations(
         connection.every = 3;
         connection.offset = 2;
         connection.probability = 0.5;
-        let mut initial = body.initial(Time::ZERO, "patch", 18, &Seconds).unwrap();
+        let mut initial = body
+            .initial(Time::ZERO, "patch", 18, None, &Seconds)
+            .unwrap();
         observe(&body, &mut initial, Time::ZERO);
         let mut whole = initial.clone();
         let expected = observe(&body, &mut whole, t(9, 2));
@@ -118,7 +190,9 @@ fn natural_connections_are_partition_independent_without_inventing_observations(
 fn capture_reads_the_next_observation_after_delivery_not_the_emission_value() {
     let mut body = clock_patch(ConnectionAction::Capture);
     body.connections[0].delay = t(1, 10);
-    let mut state = body.initial(Time::ZERO, "patch", 0, &Seconds).unwrap();
+    let mut state = body
+        .initial(Time::ZERO, "patch", 0, None, &Seconds)
+        .unwrap();
     assert_eq!(
         observe(&body, &mut state, Time::ZERO).values["capture"],
         -1.0
@@ -149,7 +223,9 @@ fn threshold_edges_wait_for_host_delivery_and_then_seconds_delay() {
     };
     body.connections[0].source = port("edge", "rising");
     body.connections[0].delay = t(1, 10);
-    let mut state = body.initial(Time::ZERO, "patch", 0, &Seconds).unwrap();
+    let mut state = body
+        .initial(Time::ZERO, "patch", 0, None, &Seconds)
+        .unwrap();
     assert!(observe(&body, &mut state, Time::ZERO).events.is_empty());
     let result = body
         .advance(&mut state, t(2, 5), t(1, 2), &Seconds)
@@ -169,13 +245,16 @@ fn threshold_edges_wait_for_host_delivery_and_then_seconds_delay() {
 #[test]
 fn external_seek_commands_do_not_add_observations_or_replay_lfo_markers() {
     let body = clock_patch(ConnectionAction::Sample);
-    let mut state = body.initial(Time::ZERO, "patch", 0, &Seconds).unwrap();
+    let mut state = body
+        .initial(Time::ZERO, "patch", 0, None, &Seconds)
+        .unwrap();
     assert!(
         body.command(
             &mut state,
             "clock",
             &event(t(1, 8), 0, ChildCommand::Playback(Command::Seek(t(1, 2)))),
-            &Seconds
+            &Seconds,
+            true,
         )
         .unwrap()
         .is_empty()
@@ -187,7 +266,9 @@ fn external_seek_commands_do_not_add_observations_or_replay_lfo_markers() {
 #[test]
 fn staged_cues_route_completion_and_preserve_partitioned_continuation() {
     let body = staged_patch();
-    let initial = body.initial(Time::ZERO, "patch", 0, &Seconds).unwrap();
+    let initial = body
+        .initial(Time::ZERO, "patch", 0, None, &Seconds)
+        .unwrap();
     let mut split = initial.clone();
     let first = observe(&body, &mut split, t(1, 2));
     assert_eq!(first.events[0].at, t(1, 2));
@@ -208,13 +289,16 @@ fn staged_cues_route_completion_and_preserve_partitioned_continuation() {
 #[test]
 fn child_command_at_completion_preempts_obsolete_routed_event() {
     let body = staged_patch();
-    let mut state = body.initial(Time::ZERO, "patch", 0, &Seconds).unwrap();
+    let mut state = body
+        .initial(Time::ZERO, "patch", 0, None, &Seconds)
+        .unwrap();
     let emitted = body
         .command(
             &mut state,
             "attack",
             &event(t(1, 2), 0, ChildCommand::Playback(Command::NoteOff)),
             &Seconds,
+            true,
         )
         .unwrap();
     assert!(emitted.is_empty());
@@ -225,7 +309,9 @@ fn child_command_at_completion_preempts_obsolete_routed_event() {
 #[test]
 fn elapsed_beat_boundaries_ignore_song_seeks_and_delays_remain_host_seconds() {
     let body = staged_patch();
-    let mut state = body.initial(Time::ZERO, "patch", 0, &PausedBeats).unwrap();
+    let mut state = body
+        .initial(Time::ZERO, "patch", 0, None, &PausedBeats)
+        .unwrap();
     let result = body
         .advance(&mut state, t(7, 8), Time::ONE, &PausedBeats)
         .unwrap();
@@ -270,7 +356,9 @@ fn slew_uses_seconds_while_transport_is_stopped_and_cues_keep_host_timestamps() 
         event_outputs: vec![],
         connections: vec![],
     };
-    let mut state = body.initial(Time::ZERO, "patch", 0, &Stopped).unwrap();
+    let mut state = body
+        .initial(Time::ZERO, "patch", 0, None, &Stopped)
+        .unwrap();
     assert_eq!(
         body.advance(&mut state, Time::ZERO, t(1, 10), &Stopped)
             .unwrap()
@@ -293,13 +381,16 @@ fn slew_uses_seconds_while_transport_is_stopped_and_cues_keep_host_timestamps() 
     }
     body.connections[0].source = port("attack", "done");
     body.event_outputs[0].source = port("attack", "done");
-    let mut state = body.initial(Time::ZERO, "patch", 0, &Stopped).unwrap();
+    let mut state = body
+        .initial(Time::ZERO, "patch", 0, None, &Stopped)
+        .unwrap();
     let emitted = body
         .command(
             &mut state,
             "attack",
             &event(Time::ONE, 0, ChildCommand::Cue("finish".into())),
             &Stopped,
+            true,
         )
         .unwrap();
     assert_eq!(emitted[0].at, Time::ONE);
@@ -322,7 +413,9 @@ fn same_time_connections_follow_declaration_order_not_target_name_order() {
         ..body.connections[0].clone()
     });
     body.connections.push(body.connections[0].clone());
-    let mut state = body.initial(Time::ZERO, "patch", 0, &Seconds).unwrap();
+    let mut state = body
+        .initial(Time::ZERO, "patch", 0, None, &Seconds)
+        .unwrap();
     observe(&body, &mut state, t(1, 4));
     let saved = state.clone();
     assert_eq!(
@@ -330,7 +423,8 @@ fn same_time_connections_follow_declaration_order_not_target_name_order() {
             &mut state,
             "held",
             &event(t(1, 4), 1, ChildCommand::Start),
-            &Seconds
+            &Seconds,
+            true,
         ),
         Err(Error::EventOrder)
     );
@@ -340,7 +434,8 @@ fn same_time_connections_follow_declaration_order_not_target_name_order() {
             &mut state,
             "held",
             &event(t(1, 4), 2, ChildCommand::Start),
-            &Seconds
+            &Seconds,
+            true,
         )
         .is_ok()
     );
@@ -391,7 +486,9 @@ fn zero_delay_cues_execute_in_connection_order_and_route_cascaded_done_once() {
             name: "done".into(),
             source: port("receiver", "done"),
         });
-        let mut state = body.initial(Time::ZERO, "patch", 0, &Seconds).unwrap();
+        let mut state = body
+            .initial(Time::ZERO, "patch", 0, None, &Seconds)
+            .unwrap();
         let initial = observe(&body, &mut state, Time::ZERO);
         let result = observe(&body, &mut state, t(1, 4));
         assert_eq!(
@@ -416,15 +513,17 @@ fn zero_delay_cues_execute_in_connection_order_and_route_cascaded_done_once() {
 fn host_clock_failure_rolls_back_deliveries_and_random_draws() {
     struct Failing;
     impl ClockMapping for Failing {
-        fn local_time(&self, at: Time) -> Result<Time, Error> {
+        fn local_time(&self, _: &str, at: Time) -> Result<Time, Error> {
             Ok(at)
         }
-        fn host_time(&self, _: Time) -> Result<Option<Time>, Error> {
+        fn host_time(&self, _: &str, _: Time) -> Result<Option<Time>, Error> {
             Err(Error::Overflow)
         }
     }
     let body = clock_patch(ConnectionAction::Sample);
-    let mut state = body.initial(Time::ZERO, "patch", 0, &Seconds).unwrap();
+    let mut state = body
+        .initial(Time::ZERO, "patch", 0, None, &Seconds)
+        .unwrap();
     let saved = state.clone();
     assert_eq!(
         body.advance(&mut state, Time::ONE, Time::from_integer(2), &Failing),
@@ -436,12 +535,15 @@ fn host_clock_failure_rolls_back_deliveries_and_random_draws() {
 #[test]
 fn lfo_pause_reverse_and_rate_commands_retime_markers_exactly() {
     let body = clock_patch(ConnectionAction::Sample);
-    let mut state = body.initial(Time::ZERO, "patch", 0, &Seconds).unwrap();
+    let mut state = body
+        .initial(Time::ZERO, "patch", 0, None, &Seconds)
+        .unwrap();
     body.command(
         &mut state,
         "clock",
         &event(t(1, 8), 0, ChildCommand::Playback(Command::Pause)),
         &Seconds,
+        true,
     )
     .unwrap();
     assert!(observe(&body, &mut state, t(1, 2)).events.is_empty());
@@ -450,6 +552,7 @@ fn lfo_pause_reverse_and_rate_commands_retime_markers_exactly() {
         "clock",
         &event(t(1, 2), 0, ChildCommand::Playback(Command::Resume)),
         &Seconds,
+        true,
     )
     .unwrap();
     body.command(
@@ -461,6 +564,7 @@ fn lfo_pause_reverse_and_rate_commands_retime_markers_exactly() {
             ChildCommand::Playback(Command::Rate(Time::from_integer(2))),
         ),
         &Seconds,
+        true,
     )
     .unwrap();
     assert_eq!(observe(&body, &mut state, t(9, 16)).events[0].at, t(9, 16));
@@ -469,6 +573,7 @@ fn lfo_pause_reverse_and_rate_commands_retime_markers_exactly() {
         "clock",
         &event(t(5, 8), 0, ChildCommand::Playback(Command::Reverse)),
         &Seconds,
+        true,
     )
     .unwrap();
     assert_eq!(
@@ -480,7 +585,9 @@ fn lfo_pause_reverse_and_rate_commands_retime_markers_exactly() {
 #[test]
 fn invalid_schedules_commands_overflow_and_capacity_leave_snapshot_unchanged() {
     let body = clock_patch(ConnectionAction::Sample);
-    let mut state = body.initial(Time::ZERO, "patch", 0, &Seconds).unwrap();
+    let mut state = body
+        .initial(Time::ZERO, "patch", 0, None, &Seconds)
+        .unwrap();
     let saved = state.clone();
     assert!(
         body.advance(&mut state, Time::ZERO, Time::ZERO, &Seconds)
@@ -492,7 +599,8 @@ fn invalid_schedules_commands_overflow_and_capacity_leave_snapshot_unchanged() {
             &mut state,
             "missing",
             &event(Time::ONE, 0, ChildCommand::Sample),
-            &Seconds
+            &Seconds,
+            true,
         )
         .is_err()
     );
@@ -502,7 +610,8 @@ fn invalid_schedules_commands_overflow_and_capacity_leave_snapshot_unchanged() {
             &mut state,
             "clock",
             &event(Time::ONE, 0, ChildCommand::Sample),
-            &Seconds
+            &Seconds,
+            true,
         )
         .is_err()
     );
@@ -519,7 +628,9 @@ fn invalid_schedules_commands_overflow_and_capacity_leave_snapshot_unchanged() {
     assert_eq!(state, saved);
     let mut body = body;
     body.connections[0].delay = Time::from_integer(i64::MAX);
-    let mut state = body.initial(Time::ZERO, "patch", 0, &Seconds).unwrap();
+    let mut state = body
+        .initial(Time::ZERO, "patch", 0, None, &Seconds)
+        .unwrap();
     let saved = state.clone();
     assert_eq!(
         body.advance(&mut state, t(1, 4), t(1, 2), &Seconds),
@@ -528,7 +639,9 @@ fn invalid_schedules_commands_overflow_and_capacity_leave_snapshot_unchanged() {
     assert_eq!(state, saved);
     let mut body = clock_patch(ConnectionAction::Sample);
     body.connections[0].delay = Time::from_integer(10000);
-    let mut state = body.initial(Time::ZERO, "patch", 0, &Seconds).unwrap();
+    let mut state = body
+        .initial(Time::ZERO, "patch", 0, None, &Seconds)
+        .unwrap();
     let saved = state.clone();
     assert_eq!(
         body.advance(
@@ -537,7 +650,7 @@ fn invalid_schedules_commands_overflow_and_capacity_leave_snapshot_unchanged() {
             Time::from_integer(4098),
             &Seconds
         ),
-        Err(Error::Capacity)
+        Err(Error::PendingCapacity)
     );
     assert_eq!(state, saved);
 }
@@ -547,13 +660,22 @@ fn normalized_graphs_reject_lfos_unknown_ports_invalid_targets_and_nonfinite_ran
     let mut body = clock_patch(ConnectionAction::Sample);
     body.children
         .push(child("self", Node::Signal(Operator::Latch("self".into()))));
-    assert!(body.initial(Time::ZERO, "patch", 0, &Seconds).is_err());
+    assert!(
+        body.initial(Time::ZERO, "patch", 0, None, &Seconds)
+            .is_err()
+    );
     body.children.pop();
     body.connections[0].source.port = "unknown".into();
-    assert!(body.initial(Time::ZERO, "patch", 0, &Seconds).is_err());
+    assert!(
+        body.initial(Time::ZERO, "patch", 0, None, &Seconds)
+            .is_err()
+    );
     body.connections[0].source.port = "tick".into();
     body.connections[0].target = "clock".into();
-    assert!(body.initial(Time::ZERO, "patch", 0, &Seconds).is_err());
+    assert!(
+        body.initial(Time::ZERO, "patch", 0, None, &Seconds)
+            .is_err()
+    );
     body.connections.clear();
     body.children.push(child(
         "infinite",
@@ -564,14 +686,14 @@ fn normalized_graphs_reject_lfos_unknown_ports_invalid_targets_and_nonfinite_ran
         }),
     ));
     assert_eq!(
-        body.initial(Time::ZERO, "patch", 0, &Seconds),
+        body.initial(Time::ZERO, "patch", 0, None, &Seconds),
         Err(Error::InvalidSignal)
     );
 }
 
 struct PausedBeats;
 impl ClockMapping for PausedBeats {
-    fn local_time(&self, seconds: Time) -> Result<Time, Error> {
+    fn local_time(&self, _: &str, seconds: Time) -> Result<Time, Error> {
         if seconds < t(1, 4) {
             Ok(seconds)
         } else if seconds <= t(3, 4) {
@@ -584,7 +706,7 @@ impl ClockMapping for PausedBeats {
             )
         }
     }
-    fn host_time(&self, local: Time) -> Result<Option<Time>, Error> {
+    fn host_time(&self, _: &str, local: Time) -> Result<Option<Time>, Error> {
         Ok(Some(if local <= t(1, 4) {
             local
         } else {
@@ -598,10 +720,10 @@ impl ClockMapping for PausedBeats {
 }
 struct Stopped;
 impl ClockMapping for Stopped {
-    fn local_time(&self, _: Time) -> Result<Time, Error> {
+    fn local_time(&self, _: &str, _: Time) -> Result<Time, Error> {
         Ok(Time::ZERO)
     }
-    fn host_time(&self, local: Time) -> Result<Option<Time>, Error> {
+    fn host_time(&self, _: &str, local: Time) -> Result<Option<Time>, Error> {
         Ok((local == Time::ZERO).then_some(Time::ZERO))
     }
 }

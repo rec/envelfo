@@ -31,7 +31,7 @@ fn patch_orchestration_matches_shared_observation_and_delivery_traces() {
     for case in corpus["cases"].as_array().unwrap() {
         let definition = patch_definition(&case["definition"]);
         let mut state = definition
-            .initial(Time::ZERO, "patch", 0, &patch::Seconds)
+            .initial(Time::ZERO, "patch", 0, None, &patch::Seconds)
             .unwrap();
         for step in case["steps"].as_array().unwrap() {
             if step["restore"] == true {

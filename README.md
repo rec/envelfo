@@ -178,7 +178,7 @@ capacity error rather than dropped events. Public Rust definition fields are
 normalized host inputs, not an authored-document/Pint parser; initialize state
 again after changing a definition.
 
-`Patch::initial(at, name, seed, clock)` validates the materialized graph, signal
+`Patch::initial(at, name, seed, keys, clock)` validates the materialized graph, signal
 dependencies, event ports, output names, action targets and finite signal ranges.
 Child, connection and event-output vectors preserve declaration order. Signal
 ordering matches Python's first-encountered dependency order. Nodes include
@@ -188,16 +188,23 @@ Latch/Threshold/Slew operators. Signals remain dimensionless and are not clipped
 `Patch::advance(state, at, next_delivery, clock)` processes exact natural events
 and queued commands, then observes the graph once. Times `at`, `next_delivery`
 and connection delays are host seconds. `Seconds` supplies the identity clock;
-beat-clock hosts implement `ClockMapping` with monotonic elapsed beats and their
-inverse host times, not seekable song positions. No tempo-map implementation,
+hosts implement `ClockMapping` for each named child, with monotonic elapsed beats
+and their inverse host times. Signal-only transport LFOs may receive seekable
+song positions; event-producing children require monotonic clocks. No tempo-map implementation,
 MIDI clock acquisition, implicit observation grid or audio rate is imposed.
 Slew always measures host seconds, including when the beat clock is stopped.
 Threshold initializes silently; later edges are timestamped at `next_delivery`,
 and any connection delay is added to that time. Capture clears Latch state at
 delivery so the next observation captures the current input.
 
+Optional prepared `StreamKeys` preserve existing sample and connection identities
+when hosts materialize several graphs together. `Node::Input` accepts host-owned
+signals through `set_input`; executable children remain owned by `PatchState`.
+
 `Patch::command` delivers an addressed child command without adding a signal
-observation. Same-time external commands can preempt Stage completion. Natural
+observation. Its inclusion flag and `Patch::settle` let hosts bracket a same-time
+command batch without adding observations or losing unrelated boundaries.
+Same-time external commands can preempt Stage completion. Natural
 events are routed before pending deliveries; connections run in declaration
 order and zero-delay cascades are processed at the same exact host time.
 Every/offset gates are first-aligned; probability zero/one consumes no random
