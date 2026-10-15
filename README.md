@@ -119,15 +119,33 @@ aligned with explicit offset; chance draws only on eligible events and not for
 probabilities zero or one. The host supplies the instance name and unsigned
 64-bit seed. SampleHold streams use `patch-{name}-{child}:sample-hold`; connection
 streams use target identity and declaration index, with the existing capture,
-cue and start suffixes. enge supplies its existing flattened host identities to
-the same gate function, so audio snapshots and seeded results remain unchanged.
+cue and start suffixes. Prepared host graphs can supply the existing flattened
+identities, so audio snapshots and seeded results retain their random streams.
 Standalone and audio-host traces must use matching identities when comparing
 chance streams, rather than assuming a global host connection index.
 
 The pending queue and emitted/delivered event work per advancement are bounded
 at 4096. Capacity errors are explicit and leave the supplied snapshot unchanged.
-NumPy block acceleration, voice ownership, and external cross-instance routing
-remain enge adapter responsibilities.
+NumPy block acceleration and voice ownership remain enge adapter responsibilities.
+
+`PreparedPatch` joins already validated generators and signal operators into one
+execution graph without imposing a common child clock or scope. Its `inputs`
+name host-owned generators; `advance_patch(..., inputs=...)` supplies their sampled
+values. Other child playback stays in `PatchState.children`. `sample_keys` and
+`connection_identities` optionally preserve prepared random-stream identities.
+Authored uFor Patches continue to inherit their declared clock and scope.
+
+`patch_event(..., inclusive=False)` and `settle_patch` bracket same-time command
+batches without manufacturing signal observations or losing unrelated boundaries.
+`next_patch_event` queries the next exact host boundary. Audio hosts can sample
+event-free leaves in blocks and pass their lists to `observe_block` for shared
+stateless graph evaluation. Retained operators still require explicit individual
+observations. These APIs do not import NumPy or acquire their own clocks.
+
+enge now uses this scheduler for Python graph playback and routed connections,
+including synth, FM, noise and sampler snapshots. Its audio snapshots store the
+shared state under `graphs`; the former per-source execution-state layout is not
+a backwards-compatible serialized snapshot format.
 
 ## Standalone Rust core
 
