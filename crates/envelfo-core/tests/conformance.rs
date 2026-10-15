@@ -8,66 +8,83 @@ use envelfo_core::{patch, signal};
 use serde_json::Value;
 
 #[test]
-fn triangle_quarter_turns_match_shared_trace() {
-    check_lfo("triangle-quarter-turns");
-}
-#[test]
-fn activation_weight_matches_shared_trace() {
-    check_lfo("lfo-delay-and-fade-are-weight");
-}
-#[test]
-fn rate_pause_and_resume_match_shared_trace() {
-    check_lfo("lfo-rate-pause-and-resume");
-}
-#[test]
-fn transport_position_matches_shared_trace() {
-    check_lfo("transport-lfo-queries-song-position-directly");
-}
-
-#[test]
 fn patch_orchestration_matches_shared_observation_and_delivery_traces() {
-    let corpus: Value =
-        serde_json::from_str(include_str!("../../../conformance/envelfo-patch.json")).unwrap();
-    for case in corpus["cases"].as_array().unwrap() {
-        let definition = patch_definition(&case["definition"]);
-        let mut state = definition
-            .initial(Time::ZERO, "patch", 0, None, &patch::Seconds)
-            .unwrap();
-        for step in case["steps"].as_array().unwrap() {
-            if step["restore"] == true {
-                state = state.clone();
-            }
-            let result = definition
-                .advance(
-                    &mut state,
-                    rational(&step["at"]),
-                    rational(&step["next_delivery"]),
-                    &patch::Seconds,
-                )
+    for text in [
+        include_str!("../../../conformance/envelfo-patch.json"),
+        include_str!("../../../conformance/envelfo-host.json"),
+    ] {
+        let corpus: Value = serde_json::from_str(text).unwrap();
+        for case in corpus["cases"].as_array().unwrap() {
+            let definition = patch_definition(&case["definition"]);
+            let clock = HostClock {
+                definition: &case["definition"],
+                tempo: &case["tempo_map"],
+            };
+            let mut state = definition
+                .initial(Time::ZERO, "patch", 0, None, &clock)
                 .unwrap();
-            let expected = step["values"].as_object().unwrap();
-            assert_eq!(result.values.len(), expected.len());
-            for (name, value) in expected {
-                assert!(
-                    (result.values[name] - value.as_f64().unwrap()).abs() <= 1e-12,
-                    "{} at {}: {:?}",
-                    case["name"],
-                    step["at"],
-                    result.values
-                );
-            }
-            let expected = step["events"].as_array().unwrap();
-            assert_eq!(result.events.len(), expected.len());
-            for (event, expected) in result.events.iter().zip(expected) {
-                assert_eq!(event.at, rational(&expected["at"]));
-                assert_eq!(event.port, expected["port"].as_str().unwrap());
+            for step in case["steps"].as_array().unwrap() {
+                if step["restore"] == true {
+                    state = state.clone();
+                }
+                let mut events = vec![];
+                if let Some(commands) = step["commands"].as_array() {
+                    for entry in commands {
+                        let event = &entry["event"];
+                        events.extend(
+                            definition
+                                .command(
+                                    &mut state,
+                                    entry["target"].as_str().unwrap(),
+                                    &patch::ChildEvent {
+                                        at: rational(&event["at"]),
+                                        ordinal: event["ordinal"].as_u64().unwrap(),
+                                        command: patch::ChildCommand::Playback(command(event)),
+                                    },
+                                    &clock,
+                                    false,
+                                )
+                                .unwrap(),
+                        );
+                    }
+                }
+                let result = definition
+                    .advance(
+                        &mut state,
+                        rational(&step["at"]),
+                        rational(&step["next_delivery"]),
+                        &clock,
+                    )
+                    .unwrap();
+                let expected = step["values"].as_object().unwrap();
+                assert_eq!(result.values.len(), expected.len());
+                for (name, value) in expected {
+                    assert!(
+                        (result.values[name] - value.as_f64().unwrap()).abs() <= 1e-12,
+                        "{} at {}: {:?}",
+                        case["name"],
+                        step["at"],
+                        result.values
+                    );
+                }
+                events.extend(result.events);
+                let expected = step["events"].as_array().unwrap();
+                assert_eq!(events.len(), expected.len());
+                for (event, expected) in events.iter().zip(expected) {
+                    assert_eq!(event.at, rational(&expected["at"]));
+                    assert_eq!(event.port, expected["port"].as_str().unwrap());
+                }
+                if let Some(pending) = step["pending"].as_array() {
+                    assert_eq!(state.pending_count(), pending.len());
+                    assert_eq!(state.next_delivery(), pending.iter().map(rational).min());
+                }
             }
         }
     }
 }
 
 #[test]
-fn envelopes_and_stages_match_every_shared_trace() {
+fn bodies_match_every_shared_trace() {
     for case in corpus()["cases"].as_array().unwrap() {
         let body = &case["definition"];
         match body["kind"].as_str().unwrap() {
@@ -162,7 +179,7 @@ fn envelopes_and_stages_match_every_shared_trace() {
                     }
                 }
             }
-            "lfo" => {}
+            "lfo" => check_lfo(case),
             _ => panic!("unverified body"),
         }
     }
@@ -233,20 +250,13 @@ fn rational(value: &Value) -> Time {
     }
 }
 
-fn check_lfo(name: &str) {
-    let corpus = corpus();
-    let case = corpus["cases"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|c| c["name"] == name)
-        .unwrap();
+fn check_lfo(case: &Value) {
     let definition = &case["definition"];
     let body = definition;
     assert_eq!(body["kind"], "lfo");
     assert!(
         body["markers"].is_null() || body["markers"].as_array().unwrap().is_empty(),
-        "LFO marker emission is not extracted yet"
+        "scalar LFO queries do not emit marker events; use Stages or Patch"
     );
     let mut lfo = lfo(body);
     if definition["clock"] == "beats" {
@@ -308,6 +318,12 @@ fn lfo(body: &Value) -> LFO {
         "free" => Reset::Free,
         _ => panic!("unsupported reset"),
     };
+    if body["clock"] == "beats" {
+        lfo.clock = Clock::Beats;
+    }
+    if body["position_driver"] == "transport" {
+        lfo.driver = Driver::Transport;
+    }
     lfo
 }
 
@@ -482,6 +498,12 @@ fn patch_definition(body: &Value) -> patch::Patch {
                     },
                     "envelope" => patch::Node::Envelope(envelope(body)),
                     "stages" => patch::Node::Stages(stages(body)),
+                    "sample_hold" => {
+                        patch::Node::SampleHold(envelfo_core::sample_hold::SampleHold {
+                            minimum: body["minimum"].as_f64().unwrap(),
+                            maximum: body["maximum"].as_f64().unwrap(),
+                        })
+                    }
                     "affine" => patch::Node::Signal(signal::Operator::Affine {
                         input: body["input"].as_str().unwrap().into(),
                         scale: body["scale"].as_f64().unwrap_or(1.0),
@@ -552,6 +574,8 @@ fn patch_definition(body: &Value) -> patch::Patch {
                         target: c["target"].as_str().unwrap().into(),
                         action: match c["action"].as_str().unwrap_or("start") {
                             "start" => patch::ConnectionAction::Start,
+                            "capture" => patch::ConnectionAction::Capture,
+                            "sample" => patch::ConnectionAction::Sample,
                             _ => panic!("unverified connection action"),
                         },
                         every: c["every"].as_u64().unwrap_or(1),
@@ -566,5 +590,93 @@ fn patch_definition(body: &Value) -> patch::Patch {
                     .collect()
             })
             .unwrap_or_default(),
+    }
+}
+
+// This is a fixture host, not a second tempo implementation in the library.
+// It integrates the same accepted points supplied to Python's TempoMap.
+struct HostClock<'a> {
+    definition: &'a Value,
+    tempo: &'a Value,
+}
+
+impl patch::ClockMapping for HostClock<'_> {
+    fn local_time(&self, child: &str, seconds: Time) -> Result<Time, envelfo_core::Error> {
+        let body = &self.definition["envelfos"][child];
+        if body["clock"] != "beats" {
+            return Ok(seconds);
+        }
+        let points = self.tempo["points"].as_array().unwrap();
+        let mut elapsed = Time::ZERO;
+        for (index, point) in points.iter().enumerate() {
+            let start = rational(&point["at_seconds"]);
+            let end = points
+                .get(index + 1)
+                .map(|p| rational(&p["at_seconds"]))
+                .unwrap_or(seconds)
+                .min(seconds);
+            let running = point["running"] != false;
+            if body["position_driver"] == "transport"
+                && (index + 1 == points.len()
+                    || rational(&points[index + 1]["at_seconds"]) > seconds)
+            {
+                return if running {
+                    rational(&point["beat"]).checked_add(
+                        seconds
+                            .checked_sub(start)?
+                            .checked_mul(rational(&point["bpm"]))?
+                            .checked_div(Time::from_integer(60))?,
+                    )
+                } else {
+                    Ok(rational(&point["beat"]))
+                };
+            }
+            if running && end > start {
+                elapsed = elapsed.checked_add(
+                    end.checked_sub(start)?
+                        .checked_mul(rational(&point["bpm"]))?
+                        .checked_div(Time::from_integer(60))?,
+                )?;
+            }
+            if end == seconds && body["position_driver"] != "transport" {
+                break;
+            }
+        }
+        Ok(elapsed)
+    }
+
+    fn host_time(&self, child: &str, local: Time) -> Result<Option<Time>, envelfo_core::Error> {
+        if self.definition["envelfos"][child]["clock"] != "beats" {
+            return Ok(Some(local));
+        }
+        let points = self.tempo["points"].as_array().unwrap();
+        let mut elapsed = Time::ZERO;
+        for (index, point) in points.iter().enumerate() {
+            let start = rational(&point["at_seconds"]);
+            if local == elapsed {
+                return Ok(Some(start));
+            }
+            if point["running"] == false {
+                continue;
+            }
+            let duration = points
+                .get(index + 1)
+                .map(|p| rational(&p["at_seconds"]).checked_sub(start))
+                .transpose()?;
+            let reached = local
+                .checked_sub(elapsed)?
+                .checked_mul(Time::from_integer(60))?
+                .checked_div(rational(&point["bpm"]))?;
+            if duration.is_none_or(|d| reached <= d) {
+                return Ok(Some(start.checked_add(reached)?));
+            }
+            elapsed = elapsed.checked_add(
+                duration
+                    .unwrap()
+                    .checked_mul(rational(&point["bpm"]))?
+                    .checked_div(Time::from_integer(60))?,
+            )?;
+        }
+        Ok(None)
     }
 }

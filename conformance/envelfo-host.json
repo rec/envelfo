@@ -1,0 +1,67 @@
+{
+  "cases": [
+    {
+      "name": "per-child-clocks-capture-and-slew-through-stop-and-song-seeks",
+      "definition": {
+        "envelfos": {
+          "clock": {"kind": "lfo", "clock": "beats", "shape": "triangle", "rate": "1", "markers": [{"name": "tick", "position": "1/4"}]},
+          "wave": {"kind": "lfo", "shape": "triangle", "rate": "1"},
+          "song": {"kind": "lfo", "clock": "beats", "position_driver": "transport", "reset": "transport", "shape": "triangle", "rate": "1"},
+          "constant": {"kind": "lfo", "rate": "0", "center": 1, "depth": 0},
+          "held": {"kind": "latch", "input": "wave"},
+          "slew": {"kind": "slew", "input": "constant", "rise": 2, "fall": 1, "initial": 0}
+        },
+        "outputs": {"value": "held", "limited": "slew", "elapsed": "clock", "position": "song"},
+        "event_outputs": {"tick": "clock.tick"},
+        "events": [{"source": "clock.tick", "target": "held", "action": "capture", "delay": "1/10", "every": 3}]
+      },
+      "tempo_map": {"points": [
+        {"at_seconds": "0", "beat": "0", "bpm": "60"},
+        {"at_seconds": "1/4", "beat": "10", "bpm": "120", "running": false},
+        {"at_seconds": "3/4", "beat": "4", "bpm": "120"}
+      ]},
+      "steps": [
+        {"at": "0", "next_delivery": "1/10", "values": {"value": -1, "limited": 0, "elapsed": -1, "position": -1}, "events": [], "pending": []},
+        {"at": "1/4", "next_delivery": "3/10", "values": {"value": -1, "limited": 0.5, "elapsed": 0, "position": -1}, "events": [{"at": "1/4", "port": "tick"}], "pending": ["7/20"]},
+        {"at": "3/10", "next_delivery": "31/100", "restore": true, "values": {"value": -1, "limited": 0.6, "elapsed": 0, "position": -1}, "events": [], "pending": ["7/20"]},
+        {"at": "7/20", "next_delivery": "9/25", "values": {"value": 0.4, "limited": 0.7, "elapsed": 0, "position": -1}, "events": [], "pending": []},
+        {"at": "1/2", "next_delivery": "3/5", "values": {"value": 0.4, "limited": 1, "elapsed": 0, "position": -1}, "events": [], "pending": []},
+        {"at": "3/4", "next_delivery": "4/5", "values": {"value": 0.4, "limited": 1, "elapsed": 0, "position": -1}, "events": [], "pending": []},
+        {"at": "7/8", "next_delivery": "9/10", "restore": true, "values": {"value": 0.4, "limited": 1, "elapsed": 1, "position": 0}, "events": [], "pending": []},
+        {"at": "5/4", "next_delivery": "13/10", "values": {"value": 0.4, "limited": 1, "elapsed": 0, "position": -1}, "events": [{"at": "5/4", "port": "tick"}], "pending": []},
+        {"at": "9/4", "next_delivery": "23/10", "values": {"value": 0.4, "limited": 1, "elapsed": 0, "position": -1}, "events": [{"at": "7/4", "port": "tick"}, {"at": "9/4", "port": "tick"}], "pending": ["47/20"]}
+      ]
+    },
+    {
+      "name": "curved-envelope-and-addressed-release-survive-continuation",
+      "definition": {
+        "envelfos": {"attack": {"kind": "envelope", "segments": [{"duration": "1 s", "to": 1, "curve": -5}], "release": [{"duration": "1/2 s", "to": 0}]}},
+        "outputs": {"value": "attack"}
+      },
+      "steps": [
+        {"at": "0", "next_delivery": "1/10", "commands": [{"target": "attack", "event": {"at": "0", "ordinal": 0, "action": "note_on"}}], "values": {"value": 0}, "events": []},
+        {"at": "1/2", "next_delivery": "3/5", "restore": true, "values": {"value": 0.9241418199787564}, "events": []},
+        {"at": "1", "next_delivery": "11/10", "commands": [{"target": "attack", "event": {"at": "1", "ordinal": 0, "action": "note_off"}}], "values": {"value": 1}, "events": []},
+        {"at": "5/4", "next_delivery": "13/10", "restore": true, "values": {"value": 0.5}, "events": []},
+        {"at": "3/2", "next_delivery": "8/5", "values": {"value": 0}, "events": []}
+      ]
+    },
+    {
+      "name": "sample-connection-offset-skips-before-queuing-seconds-delivery",
+      "definition": {
+        "envelfos": {
+          "clock": {"kind": "lfo", "shape": "triangle", "rate": "1", "markers": [{"name": "tick", "position": "1/4"}]},
+          "sample": {"kind": "sample_hold", "minimum": 0.75, "maximum": 0.75}
+        },
+        "outputs": {"value": "sample"},
+        "events": [{"source": "clock.tick", "target": "sample", "action": "sample", "every": 3, "offset": 2, "delay": "1/10"}]
+      },
+      "steps": [
+        {"at": "0", "next_delivery": "1/10", "values": {"value": 0.75}, "events": [], "pending": []},
+        {"at": "5/4", "next_delivery": "13/10", "values": {"value": 0.75}, "events": [], "pending": []},
+        {"at": "9/4", "next_delivery": "23/10", "values": {"value": 0.75}, "events": [], "pending": ["47/20"]},
+        {"at": "47/20", "next_delivery": "12/5", "restore": true, "values": {"value": 0.75}, "events": [], "pending": []}
+      ]
+    }
+  ]
+}

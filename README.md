@@ -9,13 +9,15 @@ Normalized seek/shift, markers and looping are unavailable on indefinite
 Envelopes. Stages use these Envelopes in place of the removed Hold generator.
 
 Independent Python and Rust control libraries for envelopes, LFOs, Stages,
-composition and events. Extraction from uFor and enge is in progress.
+composition and events. The extraction audit and host boundaries are documented
+in [doc/extraction-audit.md](doc/extraction-audit.md).
 
 uFor owns the portable definitions. enveLFO owns their execution. The Python
 library requires neither NumPy nor an audio engine. The Rust core now
 supports exact LFO, Envelope, Stages and Patch execution, including signal
-operators, connection scheduling and portable random streams. Consumer adapter
-integration is still in progress.
+operators, connection scheduling and portable random streams. enge's Python and
+native renderers consume these schedulers; arpeg has optional Python and Rust
+bridges for hit-triggered Envelopes and named expression outputs.
 
 The periodic Envelfo body is `LFO`, with discriminator `kind = "lfo"` and state
 type `LFOState`. This replaces `Cycle` without compatibility aliases. Rust uses
@@ -33,6 +35,11 @@ amplitude. There are no `VoiceEnvelope` types or evaluator aliases. The runtime
 uses `EnvelfoEvent`, `EnvelfoState` and `EnvelfoValue`; Rust uses
 `envelfo_core::envelope`. Audio voice retirement and amplitude renderer support
 restrictions belong to enge, not the standalone envelope runtime.
+
+The former low-level `ufor.lfo.LFO`, its state/event/value models and its execution
+functions are removed, with no aliases. Lighting and enge block sampling use
+the same canonical LFO definition; state transitions execute only in enveLFO.
+uFor retains reset declarations and stateless waveform/activation mathematics.
 
 ## Python
 
@@ -235,17 +242,27 @@ Pending queues and processed events retain their separate 4096 limits. This
 allocating API does not promise an allocation-free real-time callback. Public
 normalized definitions must remain unchanged while using initialized state.
 
-All ten body traces, four Patch traces and portable random/identity vectors now
-pass directly in both languages. Built-in host tempo maps, serialized snapshots,
-optional Python bindings and consumer adapter replacement remain extraction work.
-The existing enge native playback still has floating-point event positions;
-using the extracted random-word kernel does not claim exact native timing.
+Shared body, Patch, host-clock and portable random/identity traces execute
+directly in both languages. Host traces include independently clocked children,
+elapsed beats across stops and song seeks, direct song-position signals,
+seconds-based delayed capture, Slew during stopped beats, event division/offset,
+curved release and continuation. Native enge event ordering uses exact rational
+times and shared Patch state; only signal evaluation becomes floating point.
+
+Rust hosts supply clock mappings; a second built-in tempo-map implementation is
+not an extraction requirement. Serialized Rust snapshots, standalone Python
+bindings to Rust, and expression-before-note-on in arpeg are separately scoped
+follow-ups, not unimplemented consumer migration.
 
 ## Verification
 
 Run `uv run pytest` for the reference tests and the language-neutral cases in
 `conformance/envelfo-runtime.json`, `conformance/envelfo-patch.json` and
-`conformance/envelfo-streams.json`. These
+`conformance/envelfo-host.json` and `conformance/envelfo-streams.json`. These
 preserve exact event ordering and
 random words, with explicit tolerances for floating-point signal values.
 Linux, Windows, and macOS checks are release gates, not per-commit jobs.
+The release workflow checks Python 3.13/3.15, repeats the tests against a built
+wheel outside the source tree without NumPy or enge, and tests/packages Rust
+independently in debug and release builds. See the audit for reproduction steps
+and explicit exclusions. No release is created or published by these checks.

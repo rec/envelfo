@@ -1,0 +1,86 @@
+name: Release library checks
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025, macos-15]
+        python: ["3.13", "3.15"]
+    defaults:
+      run:
+        shell: bash
+    env:
+      UV_PYTHON: ${{ matrix.python }}
+      # Public SSH-pinned dependencies need no release-runner SSH credentials.
+      GIT_CONFIG_COUNT: "1"
+      GIT_CONFIG_KEY_0: url.https://github.com/.insteadOf
+      GIT_CONFIG_VALUE_0: ssh://git@github.com/
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Test locked source
+        run: |
+          uv sync --frozen
+          uv run --no-sync pytest
+          uv run --no-sync ruff check --select B,E,F,I envelfo test
+          uv run --no-sync ruff format --check envelfo test
+          uv run --no-sync ty check envelfo
+      - name: Build source distribution and wheel
+        run: uv build --out-dir "$RUNNER_TEMP/envelfo-dist"
+      - name: Test installed wheel outside the checkout
+        run: |
+          uv export --quiet --frozen --no-emit-project --output-file "$RUNNER_TEMP/envelfo-requirements.txt"
+          uv venv --python "${{ matrix.python }}" "$RUNNER_TEMP/envelfo-installed"
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            installed_python="$RUNNER_TEMP/envelfo-installed/Scripts/python.exe"
+          else
+            installed_python="$RUNNER_TEMP/envelfo-installed/bin/python"
+          fi
+          uv pip sync --python "$installed_python" "$RUNNER_TEMP/envelfo-requirements.txt"
+          uv pip install --python "$installed_python" --no-deps "$RUNNER_TEMP"/envelfo-dist/*.whl
+          uv pip check --python "$installed_python"
+          for package in numpy enge; do
+            if uv pip show --python "$installed_python" "$package"; then
+              echo "Unexpected runtime dependency: $package"
+              exit 1
+            fi
+          done
+          mkdir "$RUNNER_TEMP/envelfo-wheel-tests"
+          cp -R test conformance "$RUNNER_TEMP/envelfo-wheel-tests/"
+          cd "$RUNNER_TEMP/envelfo-wheel-tests"
+          "$installed_python" -m pytest test -q
+  rust:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025, macos-15]
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: dtolnay/rust-toolchain@1.85.0
+        with:
+          components: rustfmt, clippy
+      - name: Check standalone core
+        run: |
+          git diff --no-index --exit-code LICENSE crates/envelfo-core/LICENSE
+          cargo fmt --all --check
+          cargo clippy --workspace --all-targets --locked -- -D warnings
+          cargo test --workspace --locked
+          cargo test --workspace --locked --release
+          cargo package --manifest-path crates/envelfo-core/Cargo.toml --locked
