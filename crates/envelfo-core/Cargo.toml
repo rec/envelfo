@@ -17,3 +17,7 @@ serde_json = { version = "1", features = ["float_roundtrip"], optional = true }
 
 [dev-dependencies]
 serde_json = { version = "1", features = ["preserve_order"] }
+
+[[bench]]
+name = "patch"
+harness = false
