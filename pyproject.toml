@@ -12,6 +12,9 @@ classifiers = [
 ]
 dependencies = ["ufor"]
 
+[project.optional-dependencies]
+midi = ["meedee"]
+
 [dependency-groups]
 dev = ["pytest", "pytest-xdist", "ruff", "ty", "pyupgrade"]
 
@@ -20,6 +23,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.uv.sources]
+meedee = { git = "https://github.com/rec/meedee", branch = "main" }
 ufor = { git = "https://github.com/rec/ufor", branch = "main" }
 reccy = { git = "https://github.com/rec/reccy.git", branch = "main" }
 
