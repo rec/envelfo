@@ -20,7 +20,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.uv.sources]
-ufor = { git = "ssh://git@github.com/rec/ufor.git", branch = "main" }
+ufor = { git = "https://github.com/rec/ufor", branch = "main" }
 reccy = { git = "https://github.com/rec/reccy.git", branch = "main" }
 
 [tool.pytest.ini_options]
