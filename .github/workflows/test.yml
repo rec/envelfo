@@ -36,7 +36,7 @@ jobs:
           uv run --no-sync pytest
           uv run --no-sync ruff check --select B,E,F,I envelfo test
           uv run --no-sync ruff format --check envelfo test
-          uv run --no-sync ty check envelfo
+          uv run --no-sync ty check envelfo --exclude envelfo/midi.py
       - name: Build source distribution and wheel
         run: uv build --out-dir "$RUNNER_TEMP/envelfo-dist"
       - name: Test installed wheel outside the checkout
@@ -81,7 +81,40 @@ jobs:
         run: |
           git diff --no-index --exit-code LICENSE crates/envelfo-core/LICENSE
           cargo fmt --all --check
-          cargo clippy --workspace --all-targets --locked --features "${{ matrix.features }}" -- -D warnings
-          cargo test --workspace --locked --features "${{ matrix.features }}"
-          cargo test --workspace --locked --release --features "${{ matrix.features }}"
+          cargo clippy -p envelfo-core --all-targets --locked --features "${{ matrix.features }}" -- -D warnings
+          cargo test -p envelfo-core --locked --features "${{ matrix.features }}"
+          cargo test -p envelfo-core --locked --release --features "${{ matrix.features }}"
           cargo package --manifest-path crates/envelfo-core/Cargo.toml --locked --features "${{ matrix.features }}"
+
+  midi:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025, macos-15]
+        python: ["3.13", "3.15"]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          python-version: ${{ matrix.python }}
+      - uses: dtolnay/rust-toolchain@1.87.0
+        with:
+          components: rustfmt, clippy
+      - name: Install Linux native prerequisites
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config
+      - name: Check optional MIDI integration without devices
+        run: |
+          uv sync --frozen --extra midi
+          uv run --no-sync pytest -q -n 0 test/test_midi.py
+          uv run --no-sync ty check envelfo
+          uv run --no-sync ruff check --select B,E,F,I envelfo/midi.py test/test_midi.py test/qualification/midi_output.py
+          uv run --no-sync ruff format --check envelfo/midi.py test/test_midi.py test/qualification/midi_output.py
+          cargo clippy -p envelfo-midi --locked --all-targets -- -D warnings
+          cargo test -p envelfo-midi --locked
+          cargo test -p envelfo-midi --locked --release

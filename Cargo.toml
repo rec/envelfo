@@ -1,3 +1,4 @@
 [workspace]
-members = ["crates/envelfo-core"]
+members = ["crates/envelfo-core", "crates/envelfo-midi"]
+default-members = ["crates/envelfo-core"]
 resolver = "3"
