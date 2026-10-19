@@ -304,3 +304,20 @@ wheel outside the source tree without NumPy or enge, and tests/packages Rust
 independently in debug and release builds, with JSON snapshots disabled and
 enabled. See the audit for reproduction steps
 and explicit exclusions. No release is created or published by these checks.
+
+## Optional MIDI control output
+
+Install `enveLFO[midi]` (`uv sync --extra midi`) for `envelfo.midi`, or select the
+Rust `envelfo-midi` crate. Map observed named values to meedee CC, fine-CC and
+RPN/NRPN Set commands with explicit source ranges, integer quantization and
+wire-byte admission limits. The host confirms successful delivery; partial or
+uncertain sends require explicit recovery. The mapper owns no ports, clock or
+scheduler and never advances an enveLFO graph. Existing arpeg bridge observations
+can supply its inputs without another observation or competing expression path.
+See the [MIDI integration contract](doc/midi.md).
+
+The default Rust workspace member remains `envelfo-core` (Rust 1.85). Building
+`envelfo-midi` requires Rust 1.87, CMake/C++20 and native meedee prerequisites;
+Linux additionally needs ALSA development headers and pkg-config. `cargo test
+--workspace` now explicitly includes that optional native dependency. The core
+Python install retains no meedee, NumPy or audio-device dependency.

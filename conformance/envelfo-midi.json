@@ -1,0 +1,74 @@
+{
+  "cases": [
+    {
+      "name": "coarse-endpoints-rounding-and-confirmed-suppression",
+      "mappings": [{"output": "level", "target": {"kind": "cc", "channel": 1, "controller": 11}, "input_minimum": 0.0, "input_maximum": 1.0}],
+      "byte_rate": 1000, "burst_bytes": 100,
+      "steps": [
+        {"at": "0", "values": {"level": 0.0}, "wire": [[176, 11, 0]]},
+        {"at": "1", "values": {"level": 0.5}, "wire": [[176, 11, 64]]},
+        {"at": "2", "values": {"level": 1.0}, "wire": [[176, 11, 127]]},
+        {"at": "3", "values": {"level": 0.999}, "wire": []}
+      ]
+    },
+    {
+      "name": "subrange-ties-to-even",
+      "mappings": [{"output": "x", "target": {"kind": "cc", "channel": 2, "controller": 2}, "input_minimum": -1.0, "input_maximum": 1.0, "minimum": 10, "maximum": 14}],
+      "byte_rate": 1000, "burst_bytes": 100,
+      "steps": [
+        {"at": "0", "values": {"x": -0.75}, "wire": [[177, 2, 10]]},
+        {"at": "1", "values": {"x": -0.25}, "wire": [[177, 2, 12]]},
+        {"at": "2", "values": {"x": 0.25}, "wire": []},
+        {"at": "3", "values": {"x": 0.75}, "wire": [[177, 2, 14]]}
+      ]
+    },
+    {
+      "name": "fine-cc-channel-sixteen",
+      "mappings": [{"output": "fine", "target": {"kind": "cc14", "channel": 16, "controller": 1}, "input_minimum": 0.0, "input_maximum": 1.0}],
+      "byte_rate": 1000, "burst_bytes": 100,
+      "steps": [
+        {"at": "0", "values": {"fine": 0.0}, "wire": [[191, 1, 0], [191, 33, 0]]},
+        {"at": "1", "values": {"fine": 0.5}, "wire": [[191, 1, 64], [191, 33, 0]]},
+        {"at": "2", "values": {"fine": 1.0}, "wire": [[191, 1, 127], [191, 33, 127]]}
+      ]
+    },
+    {
+      "name": "all-targets-in-declaration-order",
+      "mappings": [
+        {"output": "x", "target": {"kind": "nrpn", "channel": 1, "parameter": 16383, "resolution": 14}, "input_minimum": 0.0, "input_maximum": 1.0},
+        {"output": "x", "target": {"kind": "rpn", "channel": 1, "parameter": 0, "resolution": 14}, "input_minimum": 0.0, "input_maximum": 1.0},
+        {"output": "x", "target": {"kind": "rpn", "channel": 2, "parameter": 1, "resolution": 7}, "input_minimum": 0.0, "input_maximum": 1.0},
+        {"output": "x", "target": {"kind": "nrpn", "channel": 2, "parameter": 2, "resolution": 7}, "input_minimum": 0.0, "input_maximum": 1.0}
+      ],
+      "byte_rate": 1000, "burst_bytes": 66,
+      "steps": [
+        {"at": "0", "values": {"x": 1.0}, "wire": [
+          [176, 99, 127], [176, 98, 127], [176, 6, 127], [176, 38, 127], [176, 101, 127], [176, 100, 127],
+          [176, 101, 0], [176, 100, 0], [176, 6, 127], [176, 38, 127], [176, 101, 127], [176, 100, 127],
+          [177, 101, 0], [177, 100, 1], [177, 6, 127], [177, 101, 127], [177, 100, 127],
+          [177, 99, 0], [177, 98, 2], [177, 6, 127], [177, 101, 127], [177, 100, 127]
+        ]},
+        {"at": "1", "values": {"x": 1.0}, "wire": []}
+      ]
+    },
+    {
+      "name": "exact-byte-refill-rejection-and-recovery",
+      "mappings": [{"output": "x", "target": {"kind": "cc14", "channel": 1, "controller": 0}, "input_minimum": 0.0, "input_maximum": 1.0}],
+      "byte_rate": 6, "burst_bytes": 6,
+      "steps": [
+        {"at": "0", "values": {"x": 0.0}, "wire": [[176, 0, 0], [176, 32, 0]]},
+        {"at": "999/1000", "values": {"x": 1.0}, "error": "budget"},
+        {"at": "1", "values": {"x": 1.0}, "wire": [[176, 0, 127], [176, 32, 127]], "confirm": false},
+        {"at": "2", "values": {"x": 0.5}, "error": "pending"},
+        {"report_loss": true},
+        {"at": "2", "values": {"x": 1.0}, "error": "failed"},
+        {"restart": true},
+        {"at": "2", "values": {"x": 1.0}, "wire": [[176, 0, 127], [176, 32, 127]]},
+        {"at": "1", "values": {"x": 0.0}, "error": "reversed"},
+        {"at": "3", "values": {}, "error": "missing"},
+        {"at": "3", "values": {"x": 1.1}, "error": "range"},
+        {"at": "3", "values": {"x": 0.0}, "wire": [[176, 0, 0], [176, 32, 0]]}
+      ]
+    }
+  ]
+}

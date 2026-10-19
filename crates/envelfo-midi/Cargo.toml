@@ -1,0 +1,15 @@
+[package]
+name = "envelfo-midi"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.87"
+description = "Caller-driven MIDI realization of observed enveLFO outputs"
+license = "MIT"
+publish = false
+
+[dependencies]
+envelfo-core = { path = "../envelfo-core" }
+meedee = { git = "https://github.com/rec/meedee", branch = "main" }
+
+[dev-dependencies]
+serde_json = "1"
