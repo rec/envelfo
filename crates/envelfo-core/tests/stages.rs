@@ -3,8 +3,9 @@ use envelfo_core::lfo::{Command, LFO, Shape};
 use envelfo_core::stages::{Action, Body, Event, Stage, StageCommand, Stages, Transition};
 use envelfo_core::time::Time;
 use envelfo_core::{Error, Status};
-use std::alloc::{GlobalAlloc, Layout, System};
-use std::cell::Cell;
+#[path = "support/allocations.rs"]
+mod allocations;
+use allocations::ALLOCATIONS;
 
 #[test]
 fn caller_buffers_preserve_events_and_state_without_allocations() {
@@ -80,41 +81,6 @@ fn caller_buffer_exhaustion_rolls_back_and_can_retry_without_allocations() {
     assert!(retried.is_ok());
     assert!(state.completed());
     assert_eq!(enough.last().unwrap().port, "done");
-}
-
-thread_local! {
-    static ALLOCATIONS: Cell<Option<usize>> = const { Cell::new(None) };
-}
-
-#[global_allocator]
-static ALLOCATOR: CountingAllocator = CountingAllocator;
-
-struct CountingAllocator;
-
-// SAFETY: All operations forward the original allocation arguments to System.
-unsafe impl GlobalAlloc for CountingAllocator {
-    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        ALLOCATIONS.with(|c| c.set(c.get().map(|n| n + 1)));
-        // SAFETY: The caller supplies a valid allocation layout.
-        unsafe { System.alloc(layout) }
-    }
-
-    unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
-        ALLOCATIONS.with(|c| c.set(c.get().map(|n| n + 1)));
-        // SAFETY: The caller supplies a valid allocation layout.
-        unsafe { System.alloc_zeroed(layout) }
-    }
-
-    unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, size: usize) -> *mut u8 {
-        ALLOCATIONS.with(|c| c.set(c.get().map(|n| n + 1)));
-        // SAFETY: The caller supplies a System-owned pointer and its layout.
-        unsafe { System.realloc(ptr, layout, size) }
-    }
-
-    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        // SAFETY: The caller supplies a System-owned pointer and its layout.
-        unsafe { System.dealloc(ptr, layout) }
-    }
 }
 
 #[test]

@@ -345,7 +345,7 @@ impl Stages {
         result
     }
 
-    fn advance_with<'a, T: AsRef<str>>(
+    pub(crate) fn advance_with<'a, T: AsRef<str>>(
         &'a self,
         state: &mut StageState,
         at: Time,
@@ -868,7 +868,7 @@ fn next_integer(value: Time, forward: bool) -> Result<i64, Error> {
     .ok_or(Error::Overflow)
 }
 
-trait EventSink<'a> {
+pub(crate) trait EventSink<'a> {
     fn emit(&mut self, event: OutputEvent<&'a str>) -> Result<(), Error>;
 }
 

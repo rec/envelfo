@@ -22,6 +22,7 @@
 //! ```
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use crate::Error;
 use crate::envelope::{
@@ -32,7 +33,7 @@ use crate::lfo::{Command, Driver, LFO, LFOState};
 use crate::random::{random_word, stream_key};
 use crate::sample_hold::{SampleCommand, SampleHold, SampleState};
 use crate::signal::Operator;
-use crate::stages::{Body, Event, OutputEvent, StageCommand, StageState, Stages};
+use crate::stages::{Body, Event, EventSink, OutputEvent, StageCommand, StageState, Stages};
 use crate::time::Time;
 
 /// Host seconds and a monotonic elapsed local clock (seconds or beats).
@@ -145,19 +146,19 @@ pub struct Patch {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum ChildCommand {
+pub enum ChildCommand<T = String> {
     Playback(Command),
     Start,
     Advance,
     Sample,
-    Cue(String),
+    Cue(T),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ChildEvent {
+pub struct ChildEvent<T = String> {
     pub at: Time,
     pub ordinal: u64,
-    pub command: ChildCommand,
+    pub command: ChildCommand<T>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -166,7 +167,71 @@ pub struct PatchAdvance {
     pub events: Vec<OutputEvent>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+/// Caller-owned buffers prepared for one unchanged Patch and its state lineage.
+/// Preparation and snapshot restoration belong outside the render callback.
+pub struct PatchStorage {
+    next: PatchState,
+    scratch: Scratch,
+    events: Vec<OutputEvent<usize>>,
+    values: Vec<f64>,
+}
+
+impl Clone for PatchStorage {
+    fn clone(&self) -> Self {
+        Self {
+            next: self.next.clone(),
+            scratch: self.scratch.clone(),
+            events: clone_buffer(&self.events),
+            values: clone_buffer(&self.values),
+        }
+    }
+}
+
+impl PatchStorage {
+    /// Values follow the Patch's declared output order. Empty after failure or
+    /// a command/settle call, which does not observe signals.
+    pub fn values(&self) -> impl ExactSizeIterator<Item = f64> + '_ {
+        self.values.iter().copied()
+    }
+
+    pub fn events(&self) -> impl ExactSizeIterator<Item = OutputEvent<&str>> + '_ {
+        self.events.iter().map(|e| OutputEvent {
+            at: e.at,
+            port: self.scratch.names[e.port].as_str(),
+            stage: self.scratch.names[e.stage].as_str(),
+            activation: e.activation,
+        })
+    }
+
+    fn begin(&mut self, state: &PatchState) -> Result<(), Error> {
+        self.events.clear();
+        self.values.clear();
+        if state.pending.len() > self.scratch.pending_limit.unwrap_or(4096) {
+            return Err(Error::PendingCapacity);
+        }
+        self.next.at = state.at;
+        self.next.cursor = state.cursor;
+        self.next.children.clone_from(&state.children);
+        self.next.retained.copy_from_slice(&state.retained);
+        self.next.inputs.copy_from_slice(&state.inputs);
+        self.next.gates.clone_from(&state.gates);
+        self.next.pending.clone_from(&state.pending);
+        self.next.observed_at = state.observed_at;
+        Ok(())
+    }
+
+    fn finish(&mut self, state: &mut PatchState, result: Result<(), Error>) -> Result<(), Error> {
+        if result.is_ok() {
+            std::mem::swap(state, &mut self.next);
+        } else {
+            self.events.clear();
+            self.values.clear();
+        }
+        result
+    }
+}
+
+#[derive(Debug, PartialEq)]
 pub struct PatchState {
     at: Time,
     cursor: Time,
@@ -179,6 +244,24 @@ pub struct PatchState {
     gates: Vec<Gate>,
     pending: Vec<Pending>,
     observed_at: Option<Time>,
+}
+
+impl Clone for PatchState {
+    fn clone(&self) -> Self {
+        Self {
+            at: self.at,
+            cursor: self.cursor,
+            name: self.name.clone(),
+            seed: self.seed,
+            children: self.children.clone(),
+            order: self.order.clone(),
+            retained: self.retained.clone(),
+            inputs: self.inputs.clone(),
+            gates: self.gates.clone(),
+            pending: clone_buffer(&self.pending),
+            observed_at: self.observed_at,
+        }
+    }
 }
 
 #[cfg(feature = "snapshots")]
@@ -253,7 +336,7 @@ pub(crate) mod snapshot {
         for pending in &state.pending {
             let connection = body.connections.get(pending.order).ok_or(invalid)?;
             if pending.target != body.index(&connection.target)?
-                || pending.action != connection.action
+                || *pending.action != connection.action
                 || pending.at < state.at
             {
                 return Err(invalid);
@@ -276,6 +359,177 @@ impl PatchState {
 }
 
 impl Patch {
+    /// Allocate reusable transaction buffers. Pending capacity may be 0..=4096;
+    /// emitted-event capacity includes output fan-out. Existing pending events
+    /// must fit. Use only with this unchanged definition and state lineage;
+    /// prepare again after restoring a snapshot or using an allocating execution
+    /// method. Between preparations, use the bounded methods and `set_input`.
+    pub fn prepare_storage(
+        &self,
+        state: &mut PatchState,
+        pending_capacity: usize,
+        event_capacity: usize,
+    ) -> Result<PatchStorage, Error> {
+        if pending_capacity > 4096 || state.pending.len() > pending_capacity {
+            return Err(Error::PendingCapacity);
+        }
+        let mut scratch = Scratch::new(self, state);
+        scratch.pending_limit = Some(pending_capacity);
+        for pending in &mut state.pending {
+            pending.action = Arc::clone(&scratch.actions[pending.order]);
+        }
+        state
+            .pending
+            .reserve(pending_capacity - state.pending.len());
+        let mut next = state.clone();
+        next.pending.reserve(pending_capacity - next.pending.len());
+        Ok(PatchStorage {
+            next,
+            scratch,
+            events: Vec::with_capacity(event_capacity),
+            values: Vec::with_capacity(self.outputs.len()),
+        })
+    }
+
+    /// Advance using prepared storage, without allocating. Errors restore the
+    /// full state (including RNGs and pending deliveries) and clear outputs.
+    /// The supplied clock must itself be allocation-free for callback use.
+    pub fn advance_into(
+        &self,
+        state: &mut PatchState,
+        at: Time,
+        next_delivery: Time,
+        clock: &impl ClockMapping,
+        storage: &mut PatchStorage,
+    ) -> Result<(), Error> {
+        storage.begin(state)?;
+        let names = Arc::clone(&storage.scratch.names);
+        let result = (|| {
+            if at < state.at {
+                return Err(Error::TimeReversed);
+            }
+            if next_delivery <= at {
+                return Err(Error::InvalidDefinition(
+                    "next delivery must follow the observation",
+                ));
+            }
+            let mut events = IndexedEvents {
+                events: &mut storage.events,
+                names: &names,
+            };
+            self.run(
+                &mut storage.next,
+                at,
+                true,
+                clock,
+                &mut storage.scratch,
+                &mut events,
+            )?;
+            self.observe(
+                &mut storage.next,
+                at,
+                next_delivery,
+                clock,
+                &mut storage.scratch,
+                &mut events,
+            )?;
+            for output in &self.outputs {
+                storage.values.push(
+                    storage.scratch.signals[self.index(&output.source)?]
+                        .ok_or(Error::InvalidSignal)?,
+                );
+            }
+            Ok(())
+        })();
+        storage.finish(state, result)
+    }
+
+    /// Deliver a borrowed command using prepared transaction and event storage.
+    pub fn command_into(
+        &self,
+        state: &mut PatchState,
+        target: &str,
+        event: &ChildEvent<&str>,
+        clock: &impl ClockMapping,
+        inclusive: bool,
+        storage: &mut PatchStorage,
+    ) -> Result<(), Error> {
+        storage.begin(state)?;
+        let names = Arc::clone(&storage.scratch.names);
+        let result = (|| {
+            if event.at < state.at {
+                return Err(Error::TimeReversed);
+            }
+            let target = self.index(target)?;
+            let mut events = IndexedEvents {
+                events: &mut storage.events,
+                names: &names,
+            };
+            self.run(
+                &mut storage.next,
+                event.at,
+                false,
+                clock,
+                &mut storage.scratch,
+                &mut events,
+            )?;
+            self.deliver(
+                &mut storage.next,
+                target,
+                event,
+                clock,
+                &mut events,
+                &mut storage.scratch,
+            )?;
+            if inclusive {
+                self.run(
+                    &mut storage.next,
+                    event.at,
+                    true,
+                    clock,
+                    &mut storage.scratch,
+                    &mut events,
+                )?;
+            }
+            storage.next.at = event.at;
+            Ok(())
+        })();
+        storage.finish(state, result)
+    }
+
+    /// Settle boundaries using prepared storage without observing signals.
+    pub fn settle_into(
+        &self,
+        state: &mut PatchState,
+        at: Time,
+        inclusive: bool,
+        clock: &impl ClockMapping,
+        storage: &mut PatchStorage,
+    ) -> Result<(), Error> {
+        storage.begin(state)?;
+        let names = Arc::clone(&storage.scratch.names);
+        let result = (|| {
+            if at < state.at {
+                return Err(Error::TimeReversed);
+            }
+            let mut events = IndexedEvents {
+                events: &mut storage.events,
+                names: &names,
+            };
+            self.run(
+                &mut storage.next,
+                at,
+                inclusive,
+                clock,
+                &mut storage.scratch,
+                &mut events,
+            )?;
+            storage.next.at = at;
+            Ok(())
+        })();
+        storage.finish(state, result)
+    }
+
     /// Validate normalized definitions once and initialize without adding an observation.
     pub fn initial(
         &self,
@@ -358,70 +612,96 @@ impl Patch {
             return Err(Error::TimeReversed);
         }
         let mut next = state.clone();
-        let mut events = self.run(&mut next, at, true, clock)?;
+        let mut scratch = Scratch::new(self, state);
+        let mut events = OwnedEvents(Vec::new());
+        self.run(&mut next, at, true, clock, &mut scratch, &mut events)?;
+        self.observe(
+            &mut next,
+            at,
+            next_delivery,
+            clock,
+            &mut scratch,
+            &mut events,
+        )?;
+        let values = self
+            .outputs
+            .iter()
+            .map(|o| {
+                Ok((
+                    o.name.clone(),
+                    scratch.signals[self.index(&o.source)?].ok_or(Error::InvalidSignal)?,
+                ))
+            })
+            .collect::<Result<_, Error>>()?;
+        *state = next;
+        Ok(PatchAdvance {
+            values,
+            events: events.0,
+        })
+    }
+
+    fn observe(
+        &self,
+        next: &mut PatchState,
+        at: Time,
+        next_delivery: Time,
+        clock: &impl ClockMapping,
+        scratch: &mut Scratch,
+        events: &mut impl for<'a> EventSink<'a>,
+    ) -> Result<(), Error> {
         next.at = at;
-        let mut signals = BTreeMap::new();
+        scratch.signals.fill(None);
         for (index, child) in self.children.iter().enumerate() {
             if let Some(current) = &next.children[index] {
                 let local = clock.local_time(&child.name, at)?;
-                signals.insert(child.name.as_str(), self.value(index, current, local)?);
+                scratch.signals[index] = Some(self.value(index, current, local)?);
             } else if child.node == Node::Input {
-                signals.insert(
-                    child.name.as_str(),
-                    next.inputs[index].ok_or(Error::InvalidDefinition(
-                        "host signal has not been supplied",
-                    ))?,
-                );
+                scratch.signals[index] = Some(next.inputs[index].ok_or(
+                    Error::InvalidDefinition("host signal has not been supplied"),
+                )?);
             }
         }
         let seconds = match next.observed_at {
             Some(previous) => at.checked_sub(previous)?,
             None => Time::ZERO,
         };
-        let mut edges = vec![];
+        scratch.edges.clear();
         for &index in &next.order {
             if let Node::Signal(operator) = &self.children[index].node {
                 let (value, edge) = operator.observe_with(
                     |name| {
-                        signals
-                            .get(name)
-                            .copied()
+                        scratch.signals[self.index(name)?]
                             .ok_or(Error::InvalidDefinition("missing Patch signal input"))
                     },
                     next.retained[index],
                     seconds,
                 )?;
-                signals.insert(self.children[index].name.as_str(), value);
+                scratch.signals[index] = Some(value);
                 if operator.retained() {
                     next.retained[index] = Some(value);
                 }
                 if let Some(port) = edge {
-                    edges.push((index, port));
+                    scratch.edges.push((index, port));
                 }
             }
         }
         next.observed_at = Some(at);
-        for (index, port) in edges {
+        for &(index, port) in &scratch.edges {
             self.route(
-                &mut next,
+                next,
                 index,
                 OutputEvent {
                     at: next_delivery,
-                    port: port.into(),
-                    stage: self.children[index].name.clone(),
+                    port,
+                    stage: &self.children[index].name,
                     activation: 0,
                 },
                 next_delivery,
-                &mut events,
+                events,
+                scratch,
             )?;
         }
-        let values = self
-            .outputs
-            .iter()
-            .map(|o| (o.name.clone(), signals[o.source.as_str()]))
-            .collect();
-        *state = next;
-        Ok(PatchAdvance { values, events })
+        Ok(())
     }
 
     /// Deliver a child command in host seconds, without observing the graph.
@@ -438,14 +718,23 @@ impl Patch {
         }
         let target = self.index(target)?;
         let mut next = state.clone();
-        let mut emitted = self.run(&mut next, event.at, false, clock)?;
-        self.deliver(&mut next, target, event, clock, &mut emitted)?;
+        let mut scratch = Scratch::new(self, state);
+        let mut emitted = OwnedEvents(Vec::new());
+        self.run(
+            &mut next,
+            event.at,
+            false,
+            clock,
+            &mut scratch,
+            &mut emitted,
+        )?;
+        self.deliver(&mut next, target, event, clock, &mut emitted, &mut scratch)?;
         if inclusive {
-            emitted.extend(self.run(&mut next, event.at, true, clock)?);
+            self.run(&mut next, event.at, true, clock, &mut scratch, &mut emitted)?;
         }
         next.at = event.at;
         *state = next;
-        Ok(emitted)
+        Ok(emitted.0)
     }
 
     /// Settle events without adding a signal observation. Hosts use an exclusive
@@ -461,10 +750,12 @@ impl Patch {
             return Err(Error::TimeReversed);
         }
         let mut next = state.clone();
-        let events = self.run(&mut next, at, inclusive, clock)?;
+        let mut scratch = Scratch::new(self, state);
+        let mut events = OwnedEvents(Vec::new());
+        self.run(&mut next, at, inclusive, clock, &mut scratch, &mut events)?;
         next.at = at;
         *state = next;
-        Ok(events)
+        Ok(events.0)
     }
 
     pub fn set_input(&self, state: &mut PatchState, child: &str, value: f64) -> Result<(), Error> {
@@ -701,67 +992,59 @@ impl Patch {
         &self,
         state: &mut PatchState,
         source: usize,
-        mut event: OutputEvent,
+        event: OutputEvent<&str>,
         seconds: Time,
-        emitted: &mut Vec<OutputEvent>,
+        emitted: &mut impl for<'a> EventSink<'a>,
+        scratch: &Scratch,
     ) -> Result<(), Error> {
         let source = &self.children[source].name;
-        let port = event.port.clone();
-        event.at = seconds;
+        let port = event.port;
         for output in &self.event_outputs {
             if output.source.child == *source && output.source.port == port {
-                let mut output_event = event.clone();
-                output_event.port.clone_from(&output.name);
-                emitted.push(output_event);
+                emitted.emit(OutputEvent {
+                    at: seconds,
+                    port: output.name.as_str(),
+                    stage: event.stage,
+                    activation: event.activation,
+                })?;
             }
         }
         for (order, connection) in self.connections.iter().enumerate() {
             if connection.source.child != *source || connection.source.port != port {
                 continue;
             }
-            if state.gates[order].forward(connection, state.seed, || {
-                let command = match &connection.action {
-                    ConnectionAction::Capture => format!("capture-{}-{order}", connection.target),
-                    ConnectionAction::Cue(_) => format!("cue-{order}"),
-                    _ => format!("start-{order}"),
-                };
-                let target_name = if connection.action == ConnectionAction::Capture {
-                    state.name.clone()
-                } else {
-                    format!("patch-{}-{}", state.name, connection.target)
-                };
-                format!("{target_name}:{command}")
-            }) {
-                if state.pending.len() == 4096 {
+            if state.gates[order].forward(connection, state.seed, scratch.keys[order]) {
+                if state.pending.len() == scratch.pending_limit.unwrap_or(4096) {
                     return Err(Error::PendingCapacity);
                 }
                 state.pending.push(Pending {
                     at: seconds.checked_add(connection.delay)?,
                     order,
                     target: self.index(&connection.target)?,
-                    action: connection.action.clone(),
+                    action: Arc::clone(&scratch.actions[order]),
                 });
             }
         }
         Ok(())
     }
 
-    fn deliver(
+    fn deliver<T: AsRef<str>>(
         &self,
         state: &mut PatchState,
         target: usize,
-        event: &ChildEvent,
+        event: &ChildEvent<T>,
         clock: &impl ClockMapping,
-        emitted: &mut Vec<OutputEvent>,
+        emitted: &mut impl for<'a> EventSink<'a>,
+        scratch: &mut Scratch,
     ) -> Result<(), Error> {
         let local = clock.local_time(&self.children[target].name, event.at)?;
         let current = state.children[target].as_mut().ok_or(Error::Unsupported(
             "commands require an executable Patch child",
         ))?;
-        let outputs = match (&self.children[target].node, current, &event.command) {
+        scratch.stages.clear();
+        match (&self.children[target].node, current, &event.command) {
             (Node::LFO { body, .. }, ChildState::Lfo(current), ChildCommand::Playback(command)) => {
                 body.command(current, local, event.ordinal, *command)?;
-                vec![]
             }
             (Node::Envelope(body), ChildState::Envelope(current), command) => {
                 let command = match command {
@@ -771,7 +1054,6 @@ impl Patch {
                     _ => return Err(Error::Unsupported("unsupported Envelope command")),
                 };
                 body.command(current, local, event.ordinal, command)?;
-                vec![]
             }
             (Node::SampleHold(body), ChildState::Sample(current), command) => {
                 let command = match command {
@@ -780,16 +1062,15 @@ impl Patch {
                     _ => return Err(Error::Unsupported("unsupported SampleHold command")),
                 };
                 body.command(current, local, event.ordinal, command)?;
-                vec![]
             }
             (Node::Stages(body), ChildState::Stages(current), command) => {
                 let command = match command {
                     ChildCommand::Playback(c) => StageCommand::Playback(*c),
-                    ChildCommand::Cue(c) => StageCommand::Cue(c.clone()),
+                    ChildCommand::Cue(c) => StageCommand::Cue(c.as_ref()),
                     ChildCommand::Advance => StageCommand::Advance,
                     _ => return Err(Error::Unsupported("unsupported Stages command")),
                 };
-                body.advance(
+                body.advance_with(
                     current,
                     local,
                     Some(&Event {
@@ -797,12 +1078,21 @@ impl Patch {
                         ordinal: event.ordinal,
                         command,
                     }),
-                )?
-                .events
+                    &mut IndexedEvents {
+                        events: &mut scratch.stages,
+                        names: &scratch.names,
+                    },
+                )?;
             }
             _ => return Err(Error::Unsupported("unsupported Patch child command")),
         };
-        for output in outputs {
+        for indexed in &scratch.stages {
+            let output = OutputEvent {
+                at: indexed.at,
+                port: scratch.names[indexed.port].as_str(),
+                stage: scratch.names[indexed.stage].as_str(),
+                activation: indexed.activation,
+            };
             let seconds = if output.at == local {
                 event.at
             } else {
@@ -810,7 +1100,7 @@ impl Patch {
                     .host_time(&self.children[target].name, output.at)?
                     .ok_or(Error::InvalidDefinition("local event has no host time"))?
             };
-            self.route(state, target, output, seconds, emitted)?;
+            self.route(state, target, output, seconds, emitted, scratch)?;
         }
         Ok(())
     }
@@ -821,8 +1111,9 @@ impl Patch {
         limit: Time,
         inclusive: bool,
         clock: &impl ClockMapping,
-    ) -> Result<Vec<OutputEvent>, Error> {
-        let mut emitted = vec![];
+        scratch: &mut Scratch,
+        emitted: &mut impl for<'a> EventSink<'a>,
+    ) -> Result<(), Error> {
         let mut processed = 0_usize;
         loop {
             let within = |at: Time| if inclusive { at <= limit } else { at < limit };
@@ -832,7 +1123,7 @@ impl Patch {
                 .filter(|e| within(e.at))
                 .map(|e| e.at)
                 .min();
-            let mut lfos = vec![];
+            scratch.lfos.clear();
             for (index, child) in self.children.iter().enumerate() {
                 let local_limit = clock.local_time(&child.name, limit)?;
                 match (&child.node, &state.children[index]) {
@@ -850,7 +1141,7 @@ impl Patch {
                         if !markers.is_empty() =>
                     {
                         let previous = clock.local_time(&child.name, state.cursor)?;
-                        for marker in markers {
+                        for (marker_index, marker) in markers.iter().enumerate() {
                             // Host-time inclusion is checked below, including stopped clocks.
                             let Some(local) = body.next_marker(
                                 current,
@@ -866,7 +1157,7 @@ impl Patch {
                                 .host_time(&child.name, local)?
                                 .ok_or(Error::InvalidDefinition("local marker has no host time"))?;
                             if within(seconds) {
-                                lfos.push((seconds, index, marker.name.clone(), local));
+                                scratch.lfos.push((seconds, index, marker_index, local));
                                 next = Some(next.map_or(seconds, |n| n.min(seconds)));
                             }
                         }
@@ -882,40 +1173,60 @@ impl Patch {
                     (&child.node, &mut state.children[index])
                 {
                     let local = clock.local_time(&child.name, seconds)?;
-                    let result = body.advance(current, local, None)?;
-                    processed += result.events.len();
-                    for event in result.events {
-                        self.route(state, index, event, seconds, &mut emitted)?;
+                    scratch.stages.clear();
+                    body.advance_with(
+                        current,
+                        local,
+                        None::<&Event<&str>>,
+                        &mut IndexedEvents {
+                            events: &mut scratch.stages,
+                            names: &scratch.names,
+                        },
+                    )?;
+                    processed += scratch.stages.len();
+                    for indexed in &scratch.stages {
+                        let event = OutputEvent {
+                            at: indexed.at,
+                            port: scratch.names[indexed.port].as_str(),
+                            stage: scratch.names[indexed.stage].as_str(),
+                            activation: indexed.activation,
+                        };
+                        self.route(state, index, event, seconds, emitted, scratch)?;
                     }
                 }
             }
-            for (at, index, port, local) in lfos {
+            for &(at, index, marker, local) in &scratch.lfos {
                 if at == seconds {
                     processed += 1;
+                    let Node::LFO { markers, .. } = &self.children[index].node else {
+                        unreachable!()
+                    };
                     self.route(
                         state,
                         index,
                         OutputEvent {
                             at: local,
-                            port,
-                            stage: self.children[index].name.clone(),
+                            port: &markers[marker].name,
+                            stage: &self.children[index].name,
                             activation: 0,
                         },
                         seconds,
-                        &mut emitted,
+                        emitted,
+                        scratch,
                     )?;
                 }
             }
             // Newly queued zero-delay connections join this phase. Newly emitted
             // commands from those deliveries are considered on the next pass.
-            let mut due: Vec<Pending> = state
-                .pending
-                .iter()
-                .filter(|e| e.at == seconds)
-                .cloned()
-                .collect();
-            due.sort_by_key(|e| e.order);
-            for event in due {
+            scratch.due.clear();
+            scratch
+                .due
+                .extend(state.pending.iter().filter(|e| e.at == seconds).cloned());
+            // Equal-order entries at this time have identical commands, targets
+            // and timestamps, so their relative order cannot change delivery.
+            scratch.due.sort_unstable_by_key(|e| e.order);
+            for due_index in 0..scratch.due.len() {
+                let event = scratch.due[due_index].clone();
                 let index = state
                     .pending
                     .iter()
@@ -923,17 +1234,17 @@ impl Patch {
                     .expect("due delivery remains queued");
                 state.pending.remove(index);
                 processed += 1;
-                if event.action == ConnectionAction::Capture {
+                if *event.action == ConnectionAction::Capture {
                     state.retained[event.target] = None;
                 } else {
                     let ordinal = state.children[event.target]
                         .as_ref()
                         .ok_or(Error::Unsupported("connection target is not executable"))?
                         .next_ordinal()?;
-                    let command = match event.action {
+                    let command = match event.action.as_ref() {
                         ConnectionAction::Start => ChildCommand::Start,
                         ConnectionAction::Sample => ChildCommand::Sample,
-                        ConnectionAction::Cue(cue) => ChildCommand::Cue(cue),
+                        ConnectionAction::Cue(cue) => ChildCommand::Cue(cue.as_str()),
                         ConnectionAction::Capture => unreachable!(),
                     };
                     self.deliver(
@@ -945,7 +1256,8 @@ impl Patch {
                             command,
                         },
                         clock,
-                        &mut emitted,
+                        emitted,
+                        scratch,
                     )?;
                 }
             }
@@ -961,16 +1273,25 @@ impl Patch {
                     (&child.node, &mut state.children[index])
                 {
                     let local = clock.local_time(&child.name, limit)?;
-                    let result = body.advance(current, local, None)?;
+                    scratch.stages.clear();
+                    body.advance_with(
+                        current,
+                        local,
+                        None::<&Event<&str>>,
+                        &mut IndexedEvents {
+                            events: &mut scratch.stages,
+                            names: &scratch.names,
+                        },
+                    )?;
                     debug_assert!(
-                        result.events.is_empty(),
+                        scratch.stages.is_empty(),
                         "scheduler must consume all Stage boundaries"
                     );
                 }
             }
             state.cursor = limit;
         }
-        Ok(emitted)
+        Ok(())
     }
 }
 
@@ -998,6 +1319,168 @@ enum ChildState {
     ),
 }
 
+/// Working storage shared by every scheduler phase in one transaction. Preparing
+/// it allocates; processing Stage events and queued cues reuses these buffers.
+struct Scratch {
+    pending_limit: Option<usize>,
+    signals: Vec<Option<f64>>,
+    edges: Vec<(usize, &'static str)>,
+    stages: Vec<OutputEvent<usize>>,
+    names: Arc<[String]>,
+    lfos: Vec<(Time, usize, usize, Time)>,
+    due: Vec<Pending>,
+    actions: Vec<Arc<ConnectionAction>>,
+    keys: Vec<u64>,
+}
+
+impl Clone for Scratch {
+    fn clone(&self) -> Self {
+        Self {
+            pending_limit: self.pending_limit,
+            signals: self.signals.clone(),
+            edges: clone_buffer(&self.edges),
+            stages: clone_buffer(&self.stages),
+            names: Arc::clone(&self.names),
+            lfos: clone_buffer(&self.lfos),
+            due: clone_buffer(&self.due),
+            actions: self.actions.clone(),
+            keys: self.keys.clone(),
+        }
+    }
+}
+
+fn clone_buffer<T: Clone>(source: &Vec<T>) -> Vec<T> {
+    let mut result = Vec::with_capacity(source.capacity());
+    result.extend_from_slice(source);
+    result
+}
+
+impl Scratch {
+    fn new(patch: &Patch, state: &PatchState) -> Self {
+        let mut names: Vec<String> = ["done", "stage.done", "cycle", "turned"]
+            .into_iter()
+            .map(str::to_owned)
+            .collect();
+        for child in &patch.children {
+            names.push(child.name.clone());
+            match &child.node {
+                Node::LFO { markers, .. } => names.extend(markers.iter().map(|m| m.name.clone())),
+                Node::Stages(body) => {
+                    for stage in &body.stages {
+                        names.push(stage.name.clone());
+                        let markers = match &stage.body {
+                            Body::Envelope(e) => &e.markers,
+                            Body::LFO(_) => &stage.markers,
+                        };
+                        names.extend(markers.iter().map(|m| m.name.clone()));
+                    }
+                }
+                _ => {}
+            }
+        }
+        names.extend(patch.event_outputs.iter().map(|o| o.name.clone()));
+        names.sort();
+        names.dedup();
+        let markers = patch
+            .children
+            .iter()
+            .map(|c| match &c.node {
+                Node::LFO { markers, .. } => markers.len(),
+                _ => 0,
+            })
+            .sum();
+        let keys = patch
+            .connections
+            .iter()
+            .enumerate()
+            .map(|(i, c)| {
+                if state.gates[i].random.is_some() || matches!(c.probability, 0.0 | 1.0) {
+                    return 0;
+                }
+                let command = match &c.action {
+                    ConnectionAction::Capture => format!("capture-{}-{i}", c.target),
+                    ConnectionAction::Cue(_) => format!("cue-{i}"),
+                    _ => format!("start-{i}"),
+                };
+                let target = if c.action == ConnectionAction::Capture {
+                    state.name.clone()
+                } else {
+                    format!("patch-{}-{}", state.name, c.target)
+                };
+                stream_key(0, &format!("{target}:{command}"))
+            })
+            .collect();
+        Self {
+            pending_limit: None,
+            signals: vec![None; patch.children.len()],
+            edges: Vec::with_capacity(patch.children.len()),
+            names: names.into(),
+            stages: Vec::with_capacity(
+                if patch
+                    .children
+                    .iter()
+                    .any(|c| matches!(c.node, Node::Stages(_)))
+                {
+                    4096
+                } else {
+                    0
+                },
+            ),
+            lfos: Vec::with_capacity(markers),
+            due: Vec::with_capacity(if patch.connections.is_empty() {
+                0
+            } else {
+                4096
+            }),
+            actions: patch
+                .connections
+                .iter()
+                .map(|c| Arc::new(c.action.clone()))
+                .collect(),
+            keys,
+        }
+    }
+}
+
+struct IndexedEvents<'a> {
+    events: &'a mut Vec<OutputEvent<usize>>,
+    names: &'a [String],
+}
+
+impl<'a> EventSink<'a> for IndexedEvents<'_> {
+    fn emit(&mut self, event: OutputEvent<&'a str>) -> Result<(), Error> {
+        if self.events.len() == self.events.capacity() {
+            return Err(Error::Capacity);
+        }
+        let index = |name: &str| {
+            self.names
+                .binary_search_by(|n| n.as_str().cmp(name))
+                .map_err(|_| Error::InvalidDefinition("unprepared event name"))
+        };
+        self.events.push(OutputEvent {
+            at: event.at,
+            port: index(event.port)?,
+            stage: index(event.stage)?,
+            activation: event.activation,
+        });
+        Ok(())
+    }
+}
+
+struct OwnedEvents(Vec<OutputEvent>);
+
+impl<'a> EventSink<'a> for OwnedEvents {
+    fn emit(&mut self, event: OutputEvent<&'a str>) -> Result<(), Error> {
+        self.0.push(OutputEvent {
+            at: event.at,
+            port: event.port.into(),
+            stage: event.stage.into(),
+            activation: event.activation,
+        });
+        Ok(())
+    }
+}
+
 impl ChildState {
     fn next_ordinal(&self) -> Result<u64, Error> {
         let ordinal = match self {
@@ -1020,7 +1503,7 @@ struct Pending {
     at: Time,
     order: usize,
     target: usize,
-    action: ConnectionAction,
+    action: Arc<ConnectionAction>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -1032,12 +1515,7 @@ struct Gate {
 }
 
 impl Gate {
-    fn forward(
-        &mut self,
-        connection: &Connection,
-        seed: u64,
-        identity: impl FnOnce() -> String,
-    ) -> bool {
+    fn forward(&mut self, connection: &Connection, seed: u64, key: u64) -> bool {
         let count = self.count.unwrap_or(connection.offset);
         self.count = Some(if count == 0 {
             connection.every - 1
@@ -1051,9 +1529,7 @@ impl Gate {
         if threshold == 1_u64 << 53 {
             return true;
         }
-        let state = self
-            .random
-            .get_or_insert_with(|| seed ^ stream_key(0, &identity()));
+        let state = self.random.get_or_insert(seed ^ key);
         random_word(state) >> 11 < threshold
     }
 }

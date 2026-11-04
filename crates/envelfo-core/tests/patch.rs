@@ -11,6 +11,247 @@ use envelfo_core::signal::Operator;
 use envelfo_core::stages::{Action, Body, Stage, Stages, Transition};
 use envelfo_core::time::Time;
 
+#[path = "support/allocations.rs"]
+mod allocations;
+use allocations::ALLOCATIONS;
+
+#[test]
+fn prepared_storage_matches_allocating_execution_without_heap_operations() {
+    let mut signals = clock_patch(ConnectionAction::Sample);
+    signals.children.push(child(
+        "edge",
+        Node::Signal(Operator::Threshold {
+            input: "clock".into(),
+            lower: -0.25,
+            upper: 0.25,
+        }),
+    ));
+    signals.children.push(child(
+        "slew",
+        Node::Signal(Operator::Slew {
+            input: "held".into(),
+            rise: 2.0,
+            fall: 1.0,
+            initial: Some(0.0),
+        }),
+    ));
+    signals.outputs.push(output("slew", "slew"));
+    signals.connections[0].source = port("edge", "rising");
+    signals.event_outputs[0] = EventOutput {
+        name: "rise".into(),
+        source: port("edge", "rising"),
+    };
+    for mut body in [
+        clock_patch(ConnectionAction::Sample),
+        clock_patch(ConnectionAction::Start),
+        clock_patch(ConnectionAction::Capture),
+        staged_patch(),
+        signals,
+    ] {
+        body.connections[0].probability = 0.5;
+        body.connections[0].delay = t(1, 10);
+        let mut expected = body
+            .initial(Time::ZERO, "bounded", 17, None, &Seconds)
+            .unwrap();
+        let mut actual = expected.clone();
+        let mut storage = body.prepare_storage(&mut actual, 32, 32).unwrap();
+        for i in 0..40 {
+            let at = t(i, 8);
+            let next = t(i + 1, 8);
+            let result = body.advance(&mut expected, at, next, &Seconds).unwrap();
+            ALLOCATIONS.set(Some(0));
+            let bounded = body.advance_into(&mut actual, at, next, &Seconds, &mut storage);
+            let heap_operations = ALLOCATIONS.replace(None).unwrap();
+            assert_eq!(heap_operations, 0);
+            bounded.unwrap();
+            assert_eq!(actual, expected);
+            assert_eq!(
+                storage.values().collect::<Vec<_>>(),
+                body.outputs
+                    .iter()
+                    .map(|o| result.values[&o.name])
+                    .collect::<Vec<_>>()
+            );
+            let events: Vec<_> = storage
+                .events()
+                .map(|e| (e.at, e.port, e.stage, e.activation))
+                .collect();
+            let expected_events: Vec<_> = result
+                .events
+                .iter()
+                .map(|e| (e.at, e.port.as_str(), e.stage.as_str(), e.activation))
+                .collect();
+            assert_eq!(events, expected_events);
+        }
+    }
+}
+
+#[cfg(feature = "snapshots")]
+#[test]
+fn snapshot_pending_cues_keep_their_wire_format_and_resume_with_prepared_storage() {
+    use envelfo_core::snapshot::Snapshot;
+    let body = staged_patch();
+    let mut state = body
+        .initial(Time::ZERO, "bounded", 17, None, &Seconds)
+        .unwrap();
+    let mut storage = body.prepare_storage(&mut state, 8, 8).unwrap();
+    body.advance_into(&mut state, t(1, 2), t(3, 5), &Seconds, &mut storage)
+        .unwrap();
+    let json = Snapshot::Patch {
+        definition: body.clone(),
+        state: state.clone(),
+    }
+    .to_json()
+    .unwrap();
+    let document: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(
+        document["snapshot"]["state"]["pending"][0]["action"],
+        serde_json::json!({"Cue": "go"})
+    );
+    let Snapshot::Patch {
+        definition,
+        state: mut restored,
+    } = Snapshot::from_json(&json).unwrap()
+    else {
+        unreachable!()
+    };
+    let mut prepared = definition.prepare_storage(&mut restored, 8, 8).unwrap();
+    ALLOCATIONS.set(Some(0));
+    let continued = body.advance_into(&mut state, Time::ONE, t(11, 10), &Seconds, &mut storage);
+    let resumed =
+        definition.advance_into(&mut restored, Time::ONE, t(11, 10), &Seconds, &mut prepared);
+    let heap_operations = ALLOCATIONS.replace(None).unwrap();
+    assert_eq!(heap_operations, 0);
+    continued.unwrap();
+    resumed.unwrap();
+    assert_eq!(state, restored);
+    assert_eq!(
+        storage.events().collect::<Vec<_>>(),
+        prepared.events().collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn bounded_cues_and_settling_preserve_command_phases_without_heap_operations() {
+    let body = staged_patch();
+    let mut state = body
+        .initial(Time::ZERO, "bounded", 0, None, &Seconds)
+        .unwrap();
+    let mut expected = state.clone();
+    let mut storage = body.prepare_storage(&mut state, 8, 8).unwrap();
+    let cue = String::from("go");
+    let command = ChildEvent {
+        at: t(1, 2),
+        ordinal: 0,
+        command: ChildCommand::Cue(cue.as_str()),
+    };
+    body.command(
+        &mut expected,
+        "receiver",
+        &event(t(1, 2), 0, ChildCommand::Cue(cue.clone())),
+        &Seconds,
+        false,
+    )
+    .unwrap();
+    let expected_events = body
+        .settle(&mut expected, t(7, 10), true, &Seconds)
+        .unwrap();
+    ALLOCATIONS.set(Some(0));
+    let commanded = body.command_into(
+        &mut state,
+        "receiver",
+        &command,
+        &Seconds,
+        false,
+        &mut storage,
+    );
+    let settled = body.settle_into(&mut state, t(7, 10), true, &Seconds, &mut storage);
+    let heap_operations = ALLOCATIONS.replace(None).unwrap();
+    assert_eq!(heap_operations, 0);
+    commanded.unwrap();
+    settled.unwrap();
+    assert_eq!(state, expected);
+    assert_eq!(
+        storage.events().map(|e| (e.at, e.port)).collect::<Vec<_>>(),
+        expected_events
+            .iter()
+            .map(|e| (e.at, e.port.as_str()))
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(storage.values().len(), 0);
+}
+
+#[test]
+fn cloned_prepared_storage_keeps_capacity_for_independent_continuation() {
+    let body = staged_patch();
+    let mut state = body
+        .initial(Time::ZERO, "bounded", 17, None, &Seconds)
+        .unwrap();
+    let mut storage = body.prepare_storage(&mut state, 8, 8).unwrap();
+    body.advance_into(&mut state, t(1, 2), t(3, 5), &Seconds, &mut storage)
+        .unwrap();
+    let mut copied = state.clone();
+    let mut prepared = storage.clone();
+    ALLOCATIONS.set(Some(0));
+    let original = body.advance_into(&mut state, Time::ONE, t(11, 10), &Seconds, &mut storage);
+    let cloned = body.advance_into(&mut copied, Time::ONE, t(11, 10), &Seconds, &mut prepared);
+    let heap_operations = ALLOCATIONS.replace(None).unwrap();
+    assert_eq!(heap_operations, 0);
+    original.unwrap();
+    cloned.unwrap();
+    assert_eq!(state, copied);
+    assert_eq!(
+        storage.events().collect::<Vec<_>>(),
+        prepared.events().collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn bounded_capacity_failures_restore_random_draws_and_allow_retry() {
+    let mut body = clock_patch(ConnectionAction::Sample);
+    body.connections[0].probability = 0.5;
+    for (pending, emitted, error) in [(0, 32, Error::PendingCapacity), (32, 0, Error::Capacity)] {
+        let mut state = body
+            .initial(Time::ZERO, "bounded", 17, None, &Seconds)
+            .unwrap();
+        let saved = state.clone();
+        let mut short = body.prepare_storage(&mut state, pending, emitted).unwrap();
+        let mut enough = body.prepare_storage(&mut state, 32, 32).unwrap();
+        ALLOCATIONS.set(Some(0));
+        let failed = body.advance_into(
+            &mut state,
+            Time::from_integer(8),
+            Time::from_integer(9),
+            &Seconds,
+            &mut short,
+        );
+        let unchanged = state == saved;
+        let retried = body.advance_into(
+            &mut state,
+            Time::from_integer(8),
+            Time::from_integer(9),
+            &Seconds,
+            &mut enough,
+        );
+        let heap_operations = ALLOCATIONS.replace(None).unwrap();
+        assert_eq!(heap_operations, 0);
+        assert_eq!(failed, Err(error));
+        assert!(unchanged);
+        assert_eq!(short.events().len(), 0);
+        assert_eq!(short.values().len(), 0);
+        retried.unwrap();
+        let mut expected = saved;
+        body.advance(
+            &mut expected,
+            Time::from_integer(8),
+            Time::from_integer(9),
+            &Seconds,
+        )
+        .unwrap();
+        assert_eq!(state, expected);
+    }
+}
+
 #[test]
 fn independently_clocked_children_route_in_host_time_across_command_phases() {
     struct Clocks;

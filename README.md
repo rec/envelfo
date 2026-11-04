@@ -211,7 +211,7 @@ definition, and does not allocate. If the buffer capacity or 4096-event limit is
 exceeded, it returns `Error::Capacity`, restores state, and clears partial output.
 Allocate the buffer before rendering and keep the definition unchanged while its
 events are borrowed. The allocating `advance` API uses the same execution logic.
-This bounded Stage API does not yet make Patch execution allocation-free.
+Patch hosts can use the prepared storage API described below.
 
 `Patch::initial(at, name, seed, keys, clock)` validates the materialized graph, signal
 dependencies, event ports, output names, action targets and finite signal ranges.
@@ -251,6 +251,32 @@ all child state, retained observations, gates, random draws and pending events.
 Pending queues and processed events retain their separate 4096 limits. This
 allocating API does not promise an allocation-free real-time callback. Public
 normalized definitions must remain unchanged while using initialized state.
+
+For bounded execution, call
+`Patch::prepare_storage(state, pending_capacity, event_capacity)` outside the
+callback. It allocates caller-owned `PatchStorage` containing transaction state,
+signal scratch, indexed event buffers and shared immutable connection actions.
+Pending capacity is 0 through 4096; event capacity includes declared output fan-out.
+The existing 4096 processed-event limit still applies. Preparation preserves
+logical state and the version 1 snapshot representation, including queued cues.
+
+Use `advance_into`, `command_into` and `settle_into` with that storage. They run
+the same scheduler as the allocating methods without allocating or freeing heap
+storage. Commands use `ChildEvent<&str>` so cue names can be borrowed. Read
+`storage.values()` in declared output order and `storage.events()` for named
+events. Each call replaces the previous outputs; commands and settling do not
+produce observed values. Capacity errors roll back all state and clear partial
+outputs. Host `ClockMapping` implementations must also avoid allocation for
+callback use.
+
+Keep the definition unchanged and use the storage only with its prepared state
+lineage. Between preparations, use the bounded methods and `set_input`. Prepare
+again after restoring a snapshot or calling an allocating execution method.
+Cloning prepared state and storage preserves their capacities for independent
+bounded continuation; perform the cloning itself outside the callback.
+Allocation-counting tests cover random and delayed connections, cues, retained
+signals, threshold edges, snapshot continuation, capacity failure and retry.
+These checks establish storage behavior, not hardware callback deadlines.
 
 Shared body, Patch, host-clock and portable random/identity traces execute
 directly in both languages. Host traces include independently clocked children,
