@@ -53,24 +53,24 @@ pub struct Stages {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum StageCommand {
+pub enum StageCommand<T = String> {
     Playback(Command),
-    Cue(String),
+    Cue(T),
     Advance,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Event {
+pub struct Event<T = String> {
     pub at: Time,
     pub ordinal: u64,
-    pub command: StageCommand,
+    pub command: StageCommand<T>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct OutputEvent {
+pub struct OutputEvent<T = String> {
     pub at: Time,
-    pub port: String,
-    pub stage: String,
+    pub port: T,
+    pub stage: T,
     pub activation: u64,
 }
 
@@ -322,6 +322,36 @@ impl Stages {
         at: Time,
         event: Option<&Event>,
     ) -> Result<Advance, Error> {
+        let mut events = vec![];
+        let value = self.advance_with(state, at, event, &mut events)?;
+        Ok(Advance { value, events })
+    }
+
+    /// Reuse caller-owned event storage without allocating. Event names borrow
+    /// this definition. On failure, state is unchanged and the buffer is empty.
+    /// Previous buffer contents are discarded, including on failure.
+    pub fn advance_into<'a>(
+        &'a self,
+        state: &mut StageState,
+        at: Time,
+        event: Option<&Event<&str>>,
+        events: &mut Vec<OutputEvent<&'a str>>,
+    ) -> Result<Value, Error> {
+        events.clear();
+        let result = self.advance_with(state, at, event, &mut BorrowedEvents(events));
+        if result.is_err() {
+            events.clear();
+        }
+        result
+    }
+
+    fn advance_with<'a, T: AsRef<str>>(
+        &'a self,
+        state: &mut StageState,
+        at: Time,
+        event: Option<&Event<T>>,
+        events: &mut impl EventSink<'a>,
+    ) -> Result<Value, Error> {
         if at < state.at {
             return Err(Error::TimeReversed);
         }
@@ -334,8 +364,7 @@ impl Stages {
             check_order(state.at, state.ordinal, at, event.ordinal)?;
         }
         let mut next = state.clone();
-        let mut events = vec![];
-        self.natural(&mut next, at, event.is_none(), &mut events)?;
+        self.natural(&mut next, at, event.is_none(), events)?;
         if let Some(event) = event {
             match &event.command {
                 StageCommand::Playback(
@@ -386,19 +415,19 @@ impl Stages {
                     next.position.coordinate = Time::ZERO;
                     next.at = at;
                     next.cursor = None;
-                    self.natural(&mut next, at, true, &mut events)?;
+                    self.natural(&mut next, at, true, events)?;
                 }
                 StageCommand::Playback(Command::NoteOn | Command::NoteOff)
                 | StageCommand::Cue(_) => {
-                    let key = match &event.command {
-                        StageCommand::Cue(s) => format!("cue.{s}"),
-                        StageCommand::Playback(Command::NoteOn) => "note_on".into(),
-                        _ => "note_off".into(),
+                    let (prefix, key) = match &event.command {
+                        StageCommand::Cue(s) => ("cue.", s.as_ref()),
+                        StageCommand::Playback(Command::NoteOn) => ("", "note_on"),
+                        _ => ("", "note_off"),
                     };
                     let activation = next.activation;
-                    self.transition(&mut next, at, &key, &mut events)?;
+                    self.transition(&mut next, at, prefix, key, events)?;
                     if next.activation == activation && !next.completed {
-                        self.natural(&mut next, at, true, &mut events)?;
+                        self.natural(&mut next, at, true, events)?;
                     }
                 }
                 _ => return Err(Error::Unsupported("unsupported Stages command")),
@@ -408,7 +437,7 @@ impl Stages {
         }
         let value = self.value(&next, at)?;
         *state = next;
-        Ok(Advance { value, events })
+        Ok(value)
     }
 
     pub fn next_event(
@@ -416,7 +445,7 @@ impl Stages {
         state: &StageState,
         limit: Time,
         inclusive: bool,
-    ) -> Result<Option<OutputEvent>, Error> {
+    ) -> Result<Option<OutputEvent<&str>>, Error> {
         Ok(self.candidate(state, limit, inclusive)?.map(|c| {
             self.output(
                 state,
@@ -424,7 +453,7 @@ impl Stages {
                 if c.port == "done" {
                     "stage.done"
                 } else {
-                    &c.port
+                    c.port
                 },
             )
         }))
@@ -437,30 +466,30 @@ impl Stages {
             .ok_or(Error::InvalidDefinition("unknown Stage name"))
     }
 
-    fn output(&self, state: &StageState, at: Time, port: &str) -> OutputEvent {
+    fn output<'a>(&'a self, state: &StageState, at: Time, port: &'a str) -> OutputEvent<&'a str> {
         OutputEvent {
             at,
-            port: port.into(),
-            stage: self.stage_name(state).into(),
+            port,
+            stage: self.stage_name(state),
             activation: state.activation,
         }
     }
 
-    fn transition(
-        &self,
+    fn transition<'a>(
+        &'a self,
         state: &mut StageState,
         at: Time,
+        prefix: &str,
         key: &str,
-        events: &mut Vec<OutputEvent>,
+        events: &mut impl EventSink<'a>,
     ) -> Result<(), Error> {
         if state.completed {
             return Ok(());
         }
-        let Some(transition) = self
-            .transitions
-            .iter()
-            .find(|t| t.event == key && t.from.iter().any(|s| s == self.stage_name(state)))
-        else {
+        let Some(transition) = self.transitions.iter().find(|t| {
+            t.event.strip_prefix(prefix) == Some(key)
+                && t.from.iter().any(|s| s == self.stage_name(state))
+        }) else {
             return Ok(());
         };
         let value = self.value(state, at)?.value;
@@ -469,7 +498,7 @@ impl Stages {
                 state.at = at;
                 state.completed = true;
                 state.complete_value = Some(value);
-                emit(events, self.output(state, at, "done"))?;
+                events.emit(self.output(state, at, "done"))?;
             }
             Action::Enter(name) => {
                 let stage = self.index(name)?;
@@ -503,12 +532,12 @@ impl Stages {
         Ok(())
     }
 
-    fn natural(
-        &self,
+    fn natural<'a>(
+        &'a self,
         state: &mut StageState,
         at: Time,
         inclusive: bool,
-        events: &mut Vec<OutputEvent>,
+        events: &mut impl EventSink<'a>,
     ) -> Result<(), Error> {
         while let Some(candidate) = self.candidate(state, at, inclusive)? {
             let stage = state.stage;
@@ -547,32 +576,24 @@ impl Stages {
                     }
                 }
             }
-            emit(
-                events,
-                self.output(
-                    state,
-                    candidate.at,
-                    if candidate.port == "done" {
-                        "stage.done"
-                    } else {
-                        &candidate.port
-                    },
-                ),
-            )?;
-            if final_repeat {
-                if final_cycle {
-                    emit(events, self.output(state, candidate.at, "cycle"))?;
-                }
-                emit(events, self.output(state, candidate.at, "stage.done"))?;
-            }
-            self.transition(
+            events.emit(self.output(
                 state,
                 candidate.at,
-                &format!("stage.{}", candidate.port),
-                events,
-            )?;
+                if candidate.port == "done" {
+                    "stage.done"
+                } else {
+                    candidate.port
+                },
+            ))?;
+            if final_repeat {
+                if final_cycle {
+                    events.emit(self.output(state, candidate.at, "cycle"))?;
+                }
+                events.emit(self.output(state, candidate.at, "stage.done"))?;
+            }
+            self.transition(state, candidate.at, "stage.", candidate.port, events)?;
             if final_repeat && state.stage == stage && state.activation == activation {
-                self.transition(state, candidate.at, "stage.done", events)?;
+                self.transition(state, candidate.at, "", "stage.done", events)?;
                 if state.stage == stage && state.activation == activation {
                     state.complete_value = Some(self.value(state, candidate.at)?.value);
                     state.completed = true;
@@ -590,12 +611,12 @@ impl Stages {
         Ok(())
     }
 
-    fn candidate(
-        &self,
+    fn candidate<'a>(
+        &'a self,
         state: &StageState,
         limit: Time,
         inclusive: bool,
-    ) -> Result<Option<Candidate>, Error> {
+    ) -> Result<Option<Candidate<'a>>, Error> {
         if limit < state.at {
             return Err(Error::TimeReversed);
         }
@@ -614,7 +635,7 @@ impl Stages {
                     Some(Candidate {
                         at: state.at,
                         order: 0,
-                        port: "done".into(),
+                        port: "done",
                     })
                 } else {
                     None
@@ -626,30 +647,33 @@ impl Stages {
         }
         let coordinate = state.position.coordinate;
         let forward = state.position.direction == Direction::Forward;
-        let mut candidates = vec![];
-        let mut add = |target: Time, order: usize, port: &str, same: bool| -> Result<(), Error> {
-            if (if forward {
-                target > coordinate
-            } else {
-                target < coordinate
-            }) || target == coordinate && same
-            {
-                let at = state.at.checked_add(
-                    target
-                        .checked_sub(coordinate)?
-                        .checked_abs()?
-                        .checked_div(state.position.rate)?,
-                )?;
-                if if inclusive { at <= limit } else { at < limit } {
-                    candidates.push(Candidate {
-                        at,
-                        order,
-                        port: port.into(),
-                    });
+        let mut candidate: Option<Candidate<'_>> = None;
+        let mut add =
+            |target: Time, order: usize, port: &'a str, same: bool| -> Result<(), Error> {
+                if (if forward {
+                    target > coordinate
+                } else {
+                    target < coordinate
+                }) || target == coordinate && same
+                {
+                    let at = state.at.checked_add(
+                        target
+                            .checked_sub(coordinate)?
+                            .checked_abs()?
+                            .checked_div(state.position.rate)?,
+                    )?;
+                    if if inclusive { at <= limit } else { at < limit } {
+                        let next = Candidate { at, order, port };
+                        if candidate
+                            .as_ref()
+                            .is_none_or(|c| next.key(forward) < c.key(forward))
+                        {
+                            candidate = Some(next);
+                        }
+                    }
                 }
-            }
-            Ok(())
-        };
+                Ok(())
+            };
         let after = |order: usize| {
             state.cursor.is_some_and(|cursor| {
                 if forward {
@@ -717,14 +741,18 @@ impl Stages {
                             continue;
                         }
                         if c.playback == Playback::Loop {
-                            vec![end.checked_add(marker.position.checked_sub(start)?)?]
+                            [
+                                Some(end.checked_add(marker.position.checked_sub(start)?)?),
+                                None,
+                            ]
                         } else {
-                            let mut bases = vec![];
+                            let mut bases = [None, None];
                             if marker.position < end {
-                                bases.push(end.checked_add(end)?.checked_sub(marker.position)?);
+                                bases[0] =
+                                    Some(end.checked_add(end)?.checked_sub(marker.position)?);
                             }
                             if marker.position > start {
-                                bases.push(
+                                bases[1] = Some(
                                     end.checked_add(width)?
                                         .checked_add(marker.position.checked_sub(start)?)?,
                                 );
@@ -732,14 +760,14 @@ impl Stages {
                             bases
                         }
                     } else if c.playback == Playback::Loop {
-                        vec![marker.position]
+                        [Some(marker.position), None]
                     } else {
-                        vec![
-                            marker.position,
-                            Time::from_integer(2).checked_sub(marker.position)?,
+                        [
+                            Some(marker.position),
+                            Some(Time::from_integer(2).checked_sub(marker.position)?),
                         ]
                     };
-                    for base in bases {
+                    for base in bases.into_iter().flatten() {
                         let offset = coordinate.checked_sub(base)?;
                         let mut turn = next_integer(offset.checked_div(period)?, forward)?;
                         if named && forward {
@@ -794,27 +822,26 @@ impl Stages {
                 }
             }
         }
-        candidates.sort_by(|a, b| {
-            a.at.cmp(&b.at).then_with(|| {
-                let rank = |c: &Candidate| {
-                    if forward || matches!(c.port.as_str(), "cycle" | "turned") {
-                        c.order as i128
-                    } else {
-                        -(c.order as i128)
-                    }
-                };
-                rank(a).cmp(&rank(b)).then_with(|| a.port.cmp(&b.port))
-            })
-        });
-        Ok(candidates.into_iter().next())
+        Ok(candidate)
     }
 }
 
 #[derive(Clone, Debug)]
-struct Candidate {
+struct Candidate<'a> {
     at: Time,
     order: usize,
-    port: String,
+    port: &'a str,
+}
+
+impl Candidate<'_> {
+    fn key(&self, forward: bool) -> (Time, i128, &str) {
+        let rank = if forward || matches!(self.port, "cycle" | "turned") {
+            self.order as i128
+        } else {
+            -(self.order as i128)
+        };
+        (self.at, rank, self.port)
+    }
 }
 
 fn markers(stage: &Stage) -> &[Marker] {
@@ -841,10 +868,33 @@ fn next_integer(value: Time, forward: bool) -> Result<i64, Error> {
     .ok_or(Error::Overflow)
 }
 
-fn emit(events: &mut Vec<OutputEvent>, event: OutputEvent) -> Result<(), Error> {
-    if events.len() == 4096 {
-        return Err(Error::Capacity);
+trait EventSink<'a> {
+    fn emit(&mut self, event: OutputEvent<&'a str>) -> Result<(), Error>;
+}
+
+impl<'a> EventSink<'a> for Vec<OutputEvent> {
+    fn emit(&mut self, event: OutputEvent<&'a str>) -> Result<(), Error> {
+        if self.len() == 4096 {
+            return Err(Error::Capacity);
+        }
+        self.push(OutputEvent {
+            at: event.at,
+            port: event.port.into(),
+            stage: event.stage.into(),
+            activation: event.activation,
+        });
+        Ok(())
     }
-    events.push(event);
-    Ok(())
+}
+
+struct BorrowedEvents<'a, 'b>(&'b mut Vec<OutputEvent<&'a str>>);
+
+impl<'a> EventSink<'a> for BorrowedEvents<'a, '_> {
+    fn emit(&mut self, event: OutputEvent<&'a str>) -> Result<(), Error> {
+        if self.0.len() == self.0.capacity() || self.0.len() == 4096 {
+            return Err(Error::Capacity);
+        }
+        self.0.push(event);
+        Ok(())
+    }
 }

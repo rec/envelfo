@@ -3,6 +3,119 @@ use envelfo_core::lfo::{Command, LFO, Shape};
 use envelfo_core::stages::{Action, Body, Event, Stage, StageCommand, Stages, Transition};
 use envelfo_core::time::Time;
 use envelfo_core::{Error, Status};
+use std::alloc::{GlobalAlloc, Layout, System};
+use std::cell::Cell;
+
+#[test]
+fn caller_buffers_preserve_events_and_state_without_allocations() {
+    for mode in [Playback::Once, Playback::Loop, Playback::PingPong] {
+        for named in [false, true] {
+            if named && mode == Playback::Once {
+                continue;
+            }
+            for reverse in [false, true] {
+                let body = repeated(mode, named, None);
+                let mut expected = body.initial(Time::ZERO).unwrap();
+                if reverse {
+                    send(
+                        &body,
+                        &mut expected,
+                        Time::ZERO,
+                        0,
+                        Command::Seek(Time::ONE),
+                    );
+                    send(&body, &mut expected, Time::ZERO, 1, Command::Reverse);
+                }
+                let mut actual = expected.clone();
+                let at = Time::from_integer(4);
+                let result = body.advance(&mut expected, at, None).unwrap();
+                let mut events = Vec::with_capacity(result.events.len());
+                ALLOCATIONS.set(Some(0));
+                let boundary = body.next_event(&actual, at, true);
+                let value = body.advance_into(&mut actual, at, None, &mut events);
+                let allocations = ALLOCATIONS.replace(None).unwrap();
+                assert_eq!(allocations, 0, "{mode:?} named={named} reverse={reverse}");
+                assert_eq!(value.unwrap(), result.value);
+                assert_eq!(actual, expected);
+                assert_eq!(
+                    boundary.unwrap().map(|e| e.at),
+                    result.events.first().map(|e| e.at)
+                );
+                assert_eq!(events.len(), result.events.len());
+                for (a, b) in events.iter().zip(&result.events) {
+                    assert_eq!(
+                        (a.at, a.port, a.stage, a.activation),
+                        (b.at, b.port.as_str(), b.stage.as_str(), b.activation)
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn caller_buffer_exhaustion_rolls_back_and_can_retry_without_allocations() {
+    let mut body = repeated(Playback::Loop, true, None);
+    body.transitions
+        .push(transition("sweep", "cue.finish", Action::Finish));
+    let mut state = body.initial(Time::ZERO).unwrap();
+    let saved = state.clone();
+    let mut short = Vec::with_capacity(1);
+    let mut enough = Vec::with_capacity(32);
+    let cue = String::from("finish");
+    ALLOCATIONS.set(Some(0));
+    let event = Event {
+        at: Time::ONE,
+        ordinal: 0,
+        command: StageCommand::Cue(cue.as_str()),
+    };
+    let failed = body.advance_into(&mut state, Time::ONE, Some(&event), &mut short);
+    let unchanged = state == saved;
+    let retried = body.advance_into(&mut state, Time::ONE, Some(&event), &mut enough);
+    let allocations = ALLOCATIONS.replace(None).unwrap();
+    assert_eq!(allocations, 0);
+    assert_eq!(failed, Err(Error::Capacity));
+    assert!(unchanged);
+    assert!(short.is_empty());
+    assert!(retried.is_ok());
+    assert!(state.completed());
+    assert_eq!(enough.last().unwrap().port, "done");
+}
+
+thread_local! {
+    static ALLOCATIONS: Cell<Option<usize>> = const { Cell::new(None) };
+}
+
+#[global_allocator]
+static ALLOCATOR: CountingAllocator = CountingAllocator;
+
+struct CountingAllocator;
+
+// SAFETY: All operations forward the original allocation arguments to System.
+unsafe impl GlobalAlloc for CountingAllocator {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        ALLOCATIONS.with(|c| c.set(c.get().map(|n| n + 1)));
+        // SAFETY: The caller supplies a valid allocation layout.
+        unsafe { System.alloc(layout) }
+    }
+
+    unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
+        ALLOCATIONS.with(|c| c.set(c.get().map(|n| n + 1)));
+        // SAFETY: The caller supplies a valid allocation layout.
+        unsafe { System.alloc_zeroed(layout) }
+    }
+
+    unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, size: usize) -> *mut u8 {
+        ALLOCATIONS.with(|c| c.set(c.get().map(|n| n + 1)));
+        // SAFETY: The caller supplies a System-owned pointer and its layout.
+        unsafe { System.realloc(ptr, layout, size) }
+    }
+
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        // SAFETY: The caller supplies a System-owned pointer and its layout.
+        unsafe { System.dealloc(ptr, layout) }
+    }
+}
 
 #[test]
 fn irregular_partitions_and_cloned_continuations_preserve_all_events() {

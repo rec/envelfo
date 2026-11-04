@@ -193,7 +193,8 @@ unlike enge's existing persistent native preparation.
 `Stages::advance(state, at, event)` processes natural boundaries and returns a
 scalar value plus ordered output events. `Stages::value` only observes state;
 it does not run transitions. `Stages::next_event` inspects the next boundary
-without advancing. Commands at a boundary preempt obsolete natural completion;
+without advancing or allocating, with names borrowed from the definition.
+Commands at a boundary preempt obsolete natural completion;
 markers precede loop boundaries, and finite repeats emit the boundary then
 `stage.done`. A finish transition emits `done`. LFO markers are stored on their
 Stage; Envelope markers are part of the Envelope definition. Envelope/Stage states
@@ -202,6 +203,15 @@ unchanged. One advance is limited to 4096 emitted events, with an explicit
 capacity error rather than dropped events. Public Rust definition fields are
 normalized host inputs, not an authored-document/Pint parser; initialize state
 again after changing a definition.
+
+`Stages::advance_into(state, at, event, events)` uses a caller-preallocated
+`Vec<OutputEvent<&str>>` and optional `Event<&str>` with a borrowed cue name.
+It clears prior events, borrows names from the Stage
+definition, and does not allocate. If the buffer capacity or 4096-event limit is
+exceeded, it returns `Error::Capacity`, restores state, and clears partial output.
+Allocate the buffer before rendering and keep the definition unchanged while its
+events are borrowed. The allocating `advance` API uses the same execution logic.
+This bounded Stage API does not yet make Patch execution allocation-free.
 
 `Patch::initial(at, name, seed, keys, clock)` validates the materialized graph, signal
 dependencies, event ports, output names, action targets and finite signal ranges.
