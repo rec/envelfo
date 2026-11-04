@@ -16,7 +16,14 @@ dependencies = ["ufor"]
 midi = ["meedee"]
 
 [dependency-groups]
-dev = ["pytest", "pytest-xdist", "ruff", "ty", "pyupgrade"]
+dev = [
+    "pytest",
+    "pytest-xdist",
+    "ruff",
+    "ty",
+    "pyupgrade",
+    "reccy>=0.2.0",
+]
 
 [build-system]
 requires = ["hatchling"]
