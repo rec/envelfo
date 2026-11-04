@@ -1,0 +1,1002 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Reusable envelopes, LFOs, and event-driven control signals">
+      
+      
+      
+        <link rel="canonical" href="https://rec.github.io/envelfo/performance/">
+      
+      
+      
+        <link rel="prev" href="../midi/">
+      
+      
+        <link rel="next" href="../reference/envelfo/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="zensical-0.0.73">
+    
+    
+      
+        <title>Rust performance and allocation audit - envelfo</title>
+      
+    
+    
+      
+        
+      
+      <link rel="stylesheet" href="../assets/stylesheets/modern/main.4ab2de0c.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Inter:300,300i,400,400i,500,500i,700,700i%7CJetBrains+Mono:400,400i,700,700i&amp;display=fallback">
+        <style>:root{--md-text-font:"Inter";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_scope.pathname.endsWith("/")||(__md_scope=new URL(__md_scope.pathname+"/",location)),__md_hash=e=>[...e].reduce(((e,t)=>(e<<5)-e+t.charCodeAt(0)),0),__md_get=(e,t=localStorage,_=__md_scope)=>JSON.parse(t.getItem(_.pathname+"."+e)),__md_set=(e,t,_=localStorage,a=__md_scope)=>{try{_.setItem(a.pathname+"."+e,JSON.stringify(t))}catch(e){}},document.documentElement.setAttribute("data-platform",navigator.platform)</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    <body dir="ltr">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer" aria-hidden="true"></label>
+    <div data-md-component="skip">
+      <a href="#__skip" class="md-skip">
+        Skip to content
+      </a>
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="./.." title="envelfo" class="md-header__button md-logo" aria-label="envelfo" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-book-open" viewBox="0 0 24 24"><path d="M12 5v16M20.001 19A2 2 0 0 0 22 17V5a2 2 0 0 0-1.999-2L16 3.002A5 5 0 0 0 12 5a5 5 0 0 0-4-2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 1.999 2H8a5 5 0 0 1 4 2 5 5 0 0 1 4-2z"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-menu" viewBox="0 0 24 24"><path d="M4 5h16M4 12h16M4 19h16"/></svg>
+      <span class="md-visually-hidden">Navigation</span>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            envelfo
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Rust performance and allocation audit
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-search" viewBox="0 0 24 24"><path d="m21 21-4.34-4.34"/><circle cx="11" cy="11" r="8"/></svg>
+          <span class="md-visually-hidden">Search</span>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog" aria-label="Search">
+  <button type="button" class="md-search__button">
+    Search
+  </button>
+</div>
+      
+    
+    <div class="md-header__source">
+      
+    </div>
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="./.." title="envelfo" class="md-nav__button md-logo" aria-label="envelfo" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-book-open" viewBox="0 0 24 24"><path d="M12 5v16M20.001 19A2 2 0 0 0 22 17V5a2 2 0 0 0-1.999-2L16 3.002A5 5 0 0 0 12 5a5 5 0 0 0-4-2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 1.999 2H8a5 5 0 0 1 4 2 5 5 0 0 1 4-2z"/></svg>
+
+    </a>
+    envelfo
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="./.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  envelfo
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../extraction-audit/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Extraction closeout audit
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../midi/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  MIDI output from named observations
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Rust performance and allocation audit
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="././" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Rust performance and allocation audit
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#reproduction" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Reproduction
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#baseline" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Baseline
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#optimized-results" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Optimized results
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#correctness-checks" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Correctness checks
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#additional-work-beyond-the-prompt" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Additional work beyond the prompt
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  API Reference
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        
+          <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+            <label class="md-nav__title" for="__nav_5">
+              <span class="md-nav__icon md-icon"></span>
+              
+  
+  API Reference
+
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
+              
+                
+                  
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_1" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../reference/envelfo/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  envelfo
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_5_1" id="__nav_5_1_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        
+          <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_1_label" aria-expanded="false">
+            <label class="md-nav__title" for="__nav_5_1">
+              <span class="md-nav__icon md-icon"></span>
+              
+  
+  envelfo
+
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
+              
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference/envelfo/midi/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  midi
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference/envelfo/patch/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  patch
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference/envelfo/random/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  random
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference/envelfo/runtime/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  runtime
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+            </ul>
+          </nav>
+        
+      
+    </li>
+  
+
+                
+              
+            </ul>
+          </nav>
+        
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  
+                    
+                    
+                    
+                      
+                    
+                    
+                      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+                      <div class="md-sidebar-button__wrapper">
+                        <label class="md-sidebar-button" for="__toc"></label>
+                      </div>
+                    
+                  
+                  <div class="md-sidebar__inner">
+                    
+
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#reproduction" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Reproduction
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#baseline" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Baseline
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#optimized-results" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Optimized results
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#correctness-checks" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Correctness checks
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#additional-work-beyond-the-prompt" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Additional work beyond the prompt
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                <a id="__skip" tabindex="-1"></a>
+                
+                  
+
+
+<h1 id="rust-performance-and-allocation-audit">Rust performance and allocation audit<a class="headerlink" href="#rust-performance-and-allocation-audit" title="Permanent link">&para;</a></h1>
+<p>Measured on macOS arm64 with Homebrew Rust 1.99.0. These are local steady-state
+microbenchmarks, not portable latency promises or allocation-free callback claims.</p>
+<h2 id="reproduction">Reproduction<a class="headerlink" href="#reproduction" title="Permanent link">&para;</a></h2>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>cargo<span class="w"> </span>bench<span class="w"> </span>-p<span class="w"> </span>envelfo-core<span class="w"> </span>--bench<span class="w"> </span>patch<span class="w"> </span>--locked
+</span></code></pre></div>
+<p>The dependency-free harness uses 256 warmup operations, then five timed runs of
+4000 operations. It reports median/min/max of the five per-run averages in
+nanoseconds per operation, not individual-call tail latency. Allocations
+are counted in a separate run, including reallocations and requested bytes, not
+peak live memory. Preparation and warmup are excluded. Returned results and state
+clones are consumed with <code>black_box</code> and dropped inside the measured operation.
+The counting System allocator is confined to the benchmark executable; the
+library retains <code>forbid(unsafe_code)</code>.
+The inactive counting check remains in the allocator during timed runs, equally
+for baseline and optimized measurements. Startup, snapshot JSON and host IO are
+not measured. macOS denied native sampler attachment, so this audit uses paired
+workload and clone-only measurements rather than claiming a sampled stack profile.</p>
+<p>Patch workloads observe at 1024 Hz. The arpeg cases use two children and two
+outputs, with or without an explicit Envelope start before every observation.
+The signal case has 64 LFOs, 64 Slews and 64 outputs. The staged case has 16
+independent marked LFO Stages. Fanout cases route a 64 Hz marker to 128 SampleHolds
+with 1/16-second delays and deterministic or 50% chance gates. Clone-only cases
+use separately warmed state, including queued deliveries, without advancing it.</p>
+<h2 id="baseline">Baseline<a class="headerlink" href="#baseline" title="Permanent link">&para;</a></h2>
+<p>Unmodified runtime at <code>3f7f060</code>, measured twice; this table records the second
+run's five-sample medians. Timing variation is visible in the harness's ranges.</p>
+<table>
+<thead>
+<tr>
+<th>Workload</th>
+<th style="text-align: right;">ns/op</th>
+<th style="text-align: right;">Allocation calls/op</th>
+<th style="text-align: right;">Requested bytes/op</th>
+<th style="text-align: right;">Clone-only ns/op</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Scalar LFO</td>
+<td style="text-align: right;">292</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">n/a</td>
+</tr>
+<tr>
+<td>arpeg observation</td>
+<td style="text-align: right;">1220</td>
+<td style="text-align: right;">12</td>
+<td style="text-align: right;">1275</td>
+<td style="text-align: right;">224</td>
+</tr>
+<tr>
+<td>arpeg start + observation</td>
+<td style="text-align: right;">1764</td>
+<td style="text-align: right;">17</td>
+<td style="text-align: right;">1728</td>
+<td style="text-align: right;">230</td>
+</tr>
+<tr>
+<td>Signals, 128 nodes</td>
+<td style="text-align: right;">43857</td>
+<td style="text-align: right;">224</td>
+<td style="text-align: right;">41991</td>
+<td style="text-align: right;">815</td>
+</tr>
+<tr>
+<td>Stages, 16 nodes</td>
+<td style="text-align: right;">17588</td>
+<td style="text-align: right;">44.18</td>
+<td style="text-align: right;">6748.65</td>
+<td style="text-align: right;">277</td>
+</tr>
+<tr>
+<td>Fanout, 128 connections</td>
+<td style="text-align: right;">29425</td>
+<td style="text-align: right;">199.75</td>
+<td style="text-align: right;">76463.19</td>
+<td style="text-align: right;">2468</td>
+</tr>
+<tr>
+<td>Chance fanout, 128 connections</td>
+<td style="text-align: right;">24873</td>
+<td style="text-align: right;">199.66</td>
+<td style="text-align: right;">59645.13</td>
+<td style="text-align: right;">1658</td>
+</tr>
+</tbody>
+</table>
+<p>Cloning is not the dominant CPU cost in these dense cases. The runtime also
+copies graph names into temporary signal maps and constructs connection stream
+identities before determining whether they are needed. Optimization starts there;
+transactional clones, exact rational times and event-capacity policies stay intact.</p>
+<h2 id="optimized-results">Optimized results<a class="headerlink" href="#optimized-results" title="Permanent link">&para;</a></h2>
+<p>The unchanged harness was rerun after optimization. This table records the final
+repeat's five-sample medians; an earlier run showed transient timing outliers,
+so these are reproducible local observations, not platform-independent guarantees.
+Allocation counts and requested bytes were stable between runs.</p>
+<table>
+<thead>
+<tr>
+<th>Workload</th>
+<th style="text-align: right;">Before ns/op</th>
+<th style="text-align: right;">After ns/op</th>
+<th style="text-align: right;">Before calls/op</th>
+<th style="text-align: right;">After calls/op</th>
+<th style="text-align: right;">After bytes/op</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Scalar LFO</td>
+<td style="text-align: right;">292</td>
+<td style="text-align: right;">288</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">0</td>
+</tr>
+<tr>
+<td>arpeg observation</td>
+<td style="text-align: right;">1220</td>
+<td style="text-align: right;">1001</td>
+<td style="text-align: right;">12</td>
+<td style="text-align: right;">10</td>
+<td style="text-align: right;">1177</td>
+</tr>
+<tr>
+<td>arpeg start + observation</td>
+<td style="text-align: right;">1764</td>
+<td style="text-align: right;">1574</td>
+<td style="text-align: right;">17</td>
+<td style="text-align: right;">15</td>
+<td style="text-align: right;">1630</td>
+</tr>
+<tr>
+<td>Signals, 128 nodes</td>
+<td style="text-align: right;">43857</td>
+<td style="text-align: right;">36514</td>
+<td style="text-align: right;">224</td>
+<td style="text-align: right;">96</td>
+<td style="text-align: right;">39443</td>
+</tr>
+<tr>
+<td>Stages, 16 nodes</td>
+<td style="text-align: right;">17588</td>
+<td style="text-align: right;">14358</td>
+<td style="text-align: right;">44.18</td>
+<td style="text-align: right;">28.18</td>
+<td style="text-align: right;">6366.65</td>
+</tr>
+<tr>
+<td>Fanout, 128 connections</td>
+<td style="text-align: right;">29425</td>
+<td style="text-align: right;">19896</td>
+<td style="text-align: right;">199.75</td>
+<td style="text-align: right;">30.75</td>
+<td style="text-align: right;">72892.81</td>
+</tr>
+<tr>
+<td>Chance fanout, 128 connections</td>
+<td style="text-align: right;">24873</td>
+<td style="text-align: right;">15206</td>
+<td style="text-align: right;">199.66</td>
+<td style="text-align: right;">30.66</td>
+<td style="text-align: right;">56074.75</td>
+</tr>
+</tbody>
+</table>
+<p>Dense routing takes 32–39% less elapsed time and makes approximately 85% fewer
+allocation calls. The signal graph makes 57% fewer allocation calls and takes
+17% less time. Small arpeg and staged workloads also improve; scalar LFO timing
+is unchanged within noise. Requested bytes fall less dramatically than allocation
+counts because transactional state/queue storage is retained.</p>
+<p>Changes are limited to:</p>
+<ul>
+<li>Borrow graph-owned names in the temporary signal map. The public owned-map
+  <code>Operator::observe</code> API and the internal borrowed map use one evaluator.</li>
+<li>Construct a connection's stream identity only when initializing its random
+  stream. Gated-out, deterministic, pre-keyed and already-seeded routes avoid
+  that string construction, without changing any stream key or draw.</li>
+<li>Return unchanged position state when elapsed time is exactly zero. This skips
+  redundant rational arithmetic in repeated staged observations, not nonzero
+  advancement or overflow checks.</li>
+</ul>
+<p>No public API, snapshot wire layout, capacity, event ordering, output ownership
+or default dependency changed. Advance/command/settle still clone and commit state
+only after success; no rollback journal or persistent scratch cache was added.
+This remains an allocating API, not a hard-real-time callback interface.</p>
+<h2 id="correctness-checks">Correctness checks<a class="headerlink" href="#correctness-checks" title="Permanent link">&para;</a></h2>
+<p>The Rust suites run with snapshots disabled and enabled, in debug and release,
+alongside formatting and strict Clippy checks. Shared body, host-clock, graph and
+random traces remain unchanged, including JSON continuation with pending events.
+Existing failure tests check state equality after arithmetic overflow,
+host-clock failures, event-order errors and both capacity limits. A new late-failure
+regression first executes chance routing and a random sample delivery, then fails
+on a missing host input or overflowing signal after a Slew update. The entire state
+must remain equal to its saved copy, and a corrected retry must match a clean run.
+A focused Stage regression also verifies that repeated observations at
+an already-consumed exact boundary do not replay events or mutate state, and
+that backwards time still errors without mutation.</p>
+<p>Only the standalone core changed. Consumer dependency pins were not refreshed,
+and Linux/Windows testing remains a release gate rather than a per-commit action.</p>
+<h2 id="additional-work-beyond-the-prompt">Additional work beyond the prompt<a class="headerlink" href="#additional-work-beyond-the-prompt" title="Permanent link">&para;</a></h2>
+<p>None.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://zensical.org/" target="_blank" rel="noopener">
+      Zensical
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog" role="status" aria-atomic="true">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      
+      
+        
+        
+      <script id="__config" type="application/json">{"annotate":null,"base":"..","features":["navigation.indexes","content.code.copy"],"redirect":null,"search":"../assets/javascripts/workers/search.c47bb847.min.js","tags":null,"translations":{"clipboard.copied":"Copied to clipboard","clipboard.copy":"Copy to clipboard","clipboard.error":"Could not copy to clipboard","search.result.more.one":"1 more on this page","search.result.more.other":"# more on this page","search.result.none":"No matching documents","search.result.one":"1 matching document","search.result.other":"# matching documents","search.result.placeholder":"Type to start searching","search.result.term.missing":"Missing","select.version":"Select version"},"version":null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.77dd0ce9.min.js"></script>
+      
+    
+  </body>
+</html>
