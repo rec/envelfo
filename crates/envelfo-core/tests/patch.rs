@@ -16,6 +16,94 @@ mod allocations;
 use allocations::ALLOCATIONS;
 
 #[test]
+fn prepared_voice_reset_matches_fresh_initialization_without_heap_operations() {
+    for mut body in [
+        clock_patch(ConnectionAction::Sample),
+        clock_patch(ConnectionAction::Start),
+        staged_patch(),
+    ] {
+        body.connections[0].probability = 0.5;
+        let keys = envelfo_core::patch::StreamKeys {
+            samples: [("held".into(), 123)].into(),
+            connections: vec![456],
+        };
+        let mut state = body
+            .initial(Time::ZERO, "reused", 17, Some(&keys), &Seconds)
+            .unwrap();
+        let mut storage = body.prepare_storage(&mut state, 32, 32).unwrap();
+        body.advance_into(&mut state, t(1, 2), t(3, 5), &Seconds, &mut storage)
+            .unwrap();
+        for (seed, supplied) in [(99, None), (7, Some(&keys)), (31, None)] {
+            let at = t(3, 2);
+            let fresh = body
+                .initial(at, "reused", seed, supplied, &Seconds)
+                .unwrap();
+            ALLOCATIONS.set(Some(0));
+            let reset = body.reset_into(&mut state, at, seed, supplied, &Seconds, &mut storage);
+            let heap_operations = ALLOCATIONS.replace(None).unwrap();
+            assert_eq!(heap_operations, 0);
+            reset.unwrap();
+            assert_eq!(state, fresh);
+            assert_eq!(storage.events().len(), 0);
+            assert_eq!(storage.values().len(), 0);
+            let mut expected = fresh;
+            body.advance(
+                &mut expected,
+                Time::from_integer(10),
+                Time::from_integer(11),
+                &Seconds,
+            )
+            .unwrap();
+            ALLOCATIONS.set(Some(0));
+            let continued = body.advance_into(
+                &mut state,
+                Time::from_integer(10),
+                Time::from_integer(11),
+                &Seconds,
+                &mut storage,
+            );
+            let heap_operations = ALLOCATIONS.replace(None).unwrap();
+            assert_eq!(heap_operations, 0);
+            continued.unwrap();
+            assert_eq!(state, expected);
+        }
+    }
+}
+
+#[test]
+fn failed_prepared_reset_preserves_the_running_voice() {
+    struct BrokenClock;
+    impl ClockMapping for BrokenClock {
+        fn local_time(&self, child: &str, at: Time) -> Result<Time, Error> {
+            if child == "held" {
+                Err(Error::Overflow)
+            } else {
+                Ok(at)
+            }
+        }
+        fn host_time(&self, _: &str, at: Time) -> Result<Option<Time>, Error> {
+            Ok(Some(at))
+        }
+    }
+    let body = clock_patch(ConnectionAction::Sample);
+    let mut state = body
+        .initial(Time::ZERO, "reused", 17, None, &Seconds)
+        .unwrap();
+    let mut storage = body.prepare_storage(&mut state, 32, 32).unwrap();
+    body.advance_into(&mut state, t(1, 2), t(3, 5), &Seconds, &mut storage)
+        .unwrap();
+    let saved = state.clone();
+    ALLOCATIONS.set(Some(0));
+    let result = body.reset_into(&mut state, Time::ONE, 99, None, &BrokenClock, &mut storage);
+    let heap_operations = ALLOCATIONS.replace(None).unwrap();
+    assert_eq!(heap_operations, 0);
+    assert_eq!(result, Err(Error::Overflow));
+    assert_eq!(state, saved);
+    assert_eq!(storage.events().len(), 0);
+    assert_eq!(storage.values().len(), 0);
+}
+
+#[test]
 fn prepared_storage_matches_allocating_execution_without_heap_operations() {
     let mut signals = clock_patch(ConnectionAction::Sample);
     signals.children.push(child(

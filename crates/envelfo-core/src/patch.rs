@@ -211,6 +211,7 @@ impl PatchStorage {
         }
         self.next.at = state.at;
         self.next.cursor = state.cursor;
+        self.next.seed = state.seed;
         self.next.children.clone_from(&state.children);
         self.next.retained.copy_from_slice(&state.retained);
         self.next.inputs.copy_from_slice(&state.inputs);
@@ -359,6 +360,50 @@ impl PatchState {
 }
 
 impl Patch {
+    /// Reinitialize a prepared voice slot at any host time, keeping its name and
+    /// storage capacities. Equivalent to `initial` with the supplied seed/keys;
+    /// prior inputs, queued events and retained observations are cleared. Errors
+    /// leave the old state intact. The clock must not allocate for callback use.
+    pub fn reset_into(
+        &self,
+        state: &mut PatchState,
+        at: Time,
+        seed: u64,
+        keys: Option<&StreamKeys>,
+        clock: &impl ClockMapping,
+        storage: &mut PatchStorage,
+    ) -> Result<(), Error> {
+        storage.begin(state)?;
+        let result = (|| {
+            if keys.is_some_and(|k| k.connections.len() != self.connections.len()) {
+                return Err(Error::InvalidDefinition("connection stream count mismatch"));
+            }
+            for (i, child) in self.children.iter().enumerate() {
+                let local = clock.local_time(&child.name, at)?;
+                let sample_key = keys
+                    .and_then(|k| k.samples.get(&child.name))
+                    .copied()
+                    .unwrap_or(storage.scratch.sample_keys[i]);
+                storage.next.children[i] = initial_child(&child.node, local, seed ^ sample_key)?;
+            }
+            storage.next.at = at;
+            storage.next.cursor = at;
+            storage.next.seed = seed;
+            storage.next.retained.fill(None);
+            storage.next.inputs.fill(None);
+            storage.next.pending.clear();
+            storage.next.observed_at = None;
+            for (i, gate) in storage.next.gates.iter_mut().enumerate() {
+                *gate = Gate {
+                    count: None,
+                    random: keys.map(|k| seed ^ k.connections[i]),
+                };
+            }
+            Ok(())
+        })();
+        storage.finish(state, result)
+    }
+
     /// Allocate reusable transaction buffers. Pending capacity may be 0..=4096;
     /// emitted-event capacity includes output fan-out. Existing pending events
     /// must fit. Use only with this unchanged definition and state lineage;
@@ -548,26 +593,16 @@ impl Patch {
             .iter()
             .map(|child| {
                 let local = clock.local_time(&child.name, at)?;
-                Ok(match &child.node {
-                    Node::LFO { body, .. } => Some(ChildState::Lfo(body.initial(local)?)),
-                    Node::Envelope(body) => Some(ChildState::Envelope(body.initial(local)?)),
-                    Node::Stages(body) => Some(ChildState::Stages(body.initial(local)?)),
-                    Node::SampleHold(body) => Some(ChildState::Sample(
-                        body.initial(
-                            local,
-                            seed ^ keys
-                                .and_then(|k| k.samples.get(&child.name))
-                                .copied()
-                                .unwrap_or_else(|| {
-                                    stream_key(
-                                        0,
-                                        &format!("patch-{name}-{}:sample-hold", child.name),
-                                    )
-                                }),
-                        )?,
-                    )),
-                    Node::Signal(_) | Node::Input => None,
-                })
+                let sample_key = if matches!(child.node, Node::SampleHold(_)) {
+                    keys.and_then(|k| k.samples.get(&child.name))
+                        .copied()
+                        .unwrap_or_else(|| {
+                            stream_key(0, &format!("patch-{name}-{}:sample-hold", child.name))
+                        })
+                } else {
+                    0
+                };
+                initial_child(&child.node, local, seed ^ sample_key)
             })
             .collect::<Result<_, Error>>()?;
         Ok(PatchState {
@@ -1331,6 +1366,7 @@ struct Scratch {
     due: Vec<Pending>,
     actions: Vec<Arc<ConnectionAction>>,
     keys: Vec<u64>,
+    sample_keys: Vec<u64>,
 }
 
 impl Clone for Scratch {
@@ -1345,6 +1381,7 @@ impl Clone for Scratch {
             due: clone_buffer(&self.due),
             actions: self.actions.clone(),
             keys: self.keys.clone(),
+            sample_keys: self.sample_keys.clone(),
         }
     }
 }
@@ -1394,7 +1431,7 @@ impl Scratch {
             .iter()
             .enumerate()
             .map(|(i, c)| {
-                if state.gates[i].random.is_some() || matches!(c.probability, 0.0 | 1.0) {
+                if matches!(c.probability, 0.0 | 1.0) {
                     return 0;
                 }
                 let command = match &c.action {
@@ -1411,6 +1448,17 @@ impl Scratch {
             })
             .collect();
         Self {
+            sample_keys: patch
+                .children
+                .iter()
+                .map(|c| {
+                    if matches!(c.node, Node::SampleHold(_)) {
+                        stream_key(0, &format!("patch-{}-{}:sample-hold", state.name, c.name))
+                    } else {
+                        0
+                    }
+                })
+                .collect(),
             pending_limit: None,
             signals: vec![None; patch.children.len()],
             edges: Vec::with_capacity(patch.children.len()),
@@ -1440,6 +1488,16 @@ impl Scratch {
             keys,
         }
     }
+}
+
+fn initial_child(node: &Node, at: Time, sample_seed: u64) -> Result<Option<ChildState>, Error> {
+    Ok(match node {
+        Node::LFO { body, .. } => Some(ChildState::Lfo(body.initial(at)?)),
+        Node::Envelope(body) => Some(ChildState::Envelope(body.initial(at)?)),
+        Node::Stages(body) => Some(ChildState::Stages(body.initial(at)?)),
+        Node::SampleHold(body) => Some(ChildState::Sample(body.initial(at, sample_seed)?)),
+        Node::Signal(_) | Node::Input => None,
+    })
 }
 
 struct IndexedEvents<'a> {

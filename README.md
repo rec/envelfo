@@ -274,6 +274,10 @@ lineage. Between preparations, use the bounded methods and `set_input`. Prepare
 again after restoring a snapshot or calling an allocating execution method.
 Cloning prepared state and storage preserves their capacities for independent
 bounded continuation; perform the cloning itself outside the callback.
+`reset_into` reuses a prepared voice slot at a supplied host time and seed, with
+optional prepared stream keys. It matches fresh initialization under the same
+Patch name, clearing inputs, queued events and retained signals. Reset performs
+no heap operations and rolls back if child initialization or clock lookup fails.
 Allocation-counting tests cover random and delayed connections, cues, retained
 signals, threshold edges, snapshot continuation, capacity failure and retry.
 These checks establish storage behavior, not hardware callback deadlines.
