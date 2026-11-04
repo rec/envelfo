@@ -141,7 +141,7 @@ Their observations already expose named floating-point values in the shape this
 mapper accepts. The mapper does not receive hits or re-observe the Patch.
 
 Preserve the existing schedule, receive same-time hits, observe once, then
-realize sequence described in [arpeg's bridge contract](../../arpeg/doc/envelfo.md).
+realize sequence described in [arpeg's bridge contract](https://github.com/rec/arpeg/blob/main/doc/envelfo.md).
 The player's owned breath, bend and pressure lanes continue through its existing
 realization path. Do not map those lanes a second time onto the same destination.
 For additional named controls, the host merges the prepared messages into its
