@@ -46,11 +46,19 @@ impl ExponentialApproach {
     }
 
     pub fn resolve(&self, initial: f64) -> Result<Vec<Segment>, Error> {
+        let mut result = Vec::with_capacity(2);
+        self.resolve_into(initial, &mut result)?;
+        Ok(result)
+    }
+
+    fn resolve_into(&self, initial: f64, result: &mut Vec<Segment>) -> Result<(), Error> {
         self.validate()?;
         if !initial.is_finite() {
             return Err(Error::InvalidDefinition("nonfinite captured level"));
         }
-        let mut result = Vec::with_capacity(2);
+        if result.capacity() - result.len() < 2 {
+            return Err(Error::Capacity);
+        }
         let mut start = initial;
         let distance = self.threshold - self.asymptote;
         if self.time_constant > 0.0 && (initial - self.threshold) * distance > 0.0 {
@@ -78,23 +86,43 @@ impl ExponentialApproach {
             curve: 0.0,
             approach: None,
         });
-        Ok(result)
+        Ok(())
     }
 }
 
 pub fn resolve_segments(parts: &[Segment], initial: f64) -> Result<Vec<Segment>, Error> {
-    let mut result = Vec::new();
+    let mut result = Vec::with_capacity(resolved_capacity(parts)?);
+    resolve_segments_into(parts, initial, &mut result)?;
+    Ok(result)
+}
+
+pub(crate) fn resolved_capacity(parts: &[Segment]) -> Result<usize, Error> {
+    parts.iter().try_fold(0_usize, |n, p| {
+        n.checked_add(if p.approach.is_some() { 2 } else { 1 })
+            .ok_or(Error::Overflow)
+    })
+}
+
+pub(crate) fn resolve_segments_into(
+    parts: &[Segment],
+    initial: f64,
+    result: &mut Vec<Segment>,
+) -> Result<(), Error> {
+    if result.capacity() < resolved_capacity(parts)? {
+        return Err(Error::Capacity);
+    }
+    result.clear();
     let mut entry = initial;
     for part in parts {
         if let Some(approach) = &part.approach {
-            result.extend(approach.resolve(entry)?);
+            approach.resolve_into(entry, result)?;
             entry = approach.transition_to;
         } else {
             result.push(part.clone());
             entry = part.to;
         }
     }
-    Ok(result)
+    Ok(())
 }
 
 fn seconds(value: f64) -> Result<Time, Error> {

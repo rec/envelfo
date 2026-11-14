@@ -1,6 +1,8 @@
 //! Normalized envelope definitions and exact attack/release playback.
 
-use crate::approach::{ExponentialApproach, resolve_segments};
+use crate::approach::{
+    ExponentialApproach, resolve_segments, resolve_segments_into, resolved_capacity,
+};
 use crate::lfo::{Command, Direction, Value};
 use crate::playback::{Position, check_order};
 use crate::time::Time;
@@ -283,7 +285,30 @@ impl Envelope {
         })
     }
 
-    /// Clone-based updates are transactional: an error never partially changes state.
+    /// Prepare transactional scratch outside a real-time command path.
+    pub fn prepare_commands(
+        &self,
+        state: &mut EnvelopeState,
+    ) -> Result<EnvelopeCommandStorage, Error> {
+        if self.captured() {
+            let capacity =
+                resolved_capacity(&self.segments)?.max(resolved_capacity(&self.release)?);
+            let parts = state
+                .resolved_segments
+                .as_mut()
+                .ok_or(Error::InvalidDefinition(
+                    "captured Envelope requires resolved state",
+                ))?;
+            if parts.capacity() < capacity {
+                parts.reserve(capacity - parts.len());
+            }
+        }
+        Ok(EnvelopeCommandStorage {
+            next: state.clone(),
+        })
+    }
+
+    /// Owning convenience path; prepared hosts use command_with_storage.
     pub fn command(
         &self,
         state: &mut EnvelopeState,
@@ -291,9 +316,36 @@ impl Envelope {
         ordinal: u64,
         command: EnvelopeCommand,
     ) -> Result<(), Error> {
+        let mut storage = self.prepare_commands(state)?;
+        self.command_with_storage(state, &mut storage, at, ordinal, command)
+    }
+
+    /// Transactional commands with no heap operations after preparation.
+    pub fn command_with_storage(
+        &self,
+        state: &mut EnvelopeState,
+        storage: &mut EnvelopeCommandStorage,
+        at: Time,
+        ordinal: u64,
+        command: EnvelopeCommand,
+    ) -> Result<(), Error> {
+        if self.captured() {
+            let capacity =
+                resolved_capacity(&self.segments)?.max(resolved_capacity(&self.release)?);
+            if [
+                state.resolved_segments.as_ref(),
+                storage.next.resolved_segments.as_ref(),
+            ]
+            .iter()
+            .any(|p| p.is_none_or(|p| p.capacity() < capacity))
+            {
+                return Err(Error::Capacity);
+            }
+        }
         check_order(state.position.at, state.ordinal, at, ordinal)?;
         let observed = self.value(state, at)?;
-        let mut next = state.clone();
+        let next = &mut storage.next;
+        next.clone_from(state);
         if state.phase == Phase::On && next.complete_coordinate.is_none() {
             let (crossed, complete) = self.completion(state, at)?;
             next.traversals = next
@@ -328,11 +380,13 @@ impl Envelope {
                     next.segment_index = 0;
                     next.position.coordinate = Time::ZERO;
                     next.position.age = Time::ZERO;
-                    next.resolved_segments = if self.captured() {
-                        Some(resolve_segments(&self.segments, next.start_value)?)
-                    } else {
-                        None
-                    };
+                    if self.captured() {
+                        resolve_segments_into(
+                            &self.segments,
+                            next.start_value,
+                            next.resolved_segments.as_mut().unwrap(),
+                        )?;
+                    }
                     next.position.rate = if self.indefinite() {
                         Time::ONE
                     } else {
@@ -350,11 +404,13 @@ impl Envelope {
                     next.segment_index = 0;
                     next.position.coordinate = Time::ZERO;
                     next.position.age = Time::ZERO;
-                    next.resolved_segments = if self.captured() {
-                        Some(resolve_segments(&self.release, next.start_value)?)
-                    } else {
-                        None
-                    };
+                    if self.captured() {
+                        resolve_segments_into(
+                            &self.release,
+                            next.start_value,
+                            next.resolved_segments.as_mut().unwrap(),
+                        )?;
+                    }
                     next.position.rate = if self.indefinite() {
                         Time::ONE
                     } else {
@@ -406,7 +462,7 @@ impl Envelope {
             _ => return Err(Error::Unsupported("unsupported Envelope command")),
         }
         next.ordinal = Some(ordinal);
-        *state = next;
+        state.clone_from(next);
         Ok(())
     }
 
@@ -585,7 +641,12 @@ pub enum Phase {
     Release,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
+pub struct EnvelopeCommandStorage {
+    next: EnvelopeState,
+}
+
+#[derive(Debug, PartialEq)]
 pub struct EnvelopeState {
     position: Position,
     pub(crate) ordinal: Option<u64>,
@@ -595,6 +656,39 @@ pub struct EnvelopeState {
     complete_coordinate: Option<Time>,
     segment_index: usize,
     resolved_segments: Option<Vec<Segment>>,
+}
+
+impl Clone for EnvelopeState {
+    fn clone(&self) -> Self {
+        Self {
+            position: self.position.clone(),
+            ordinal: self.ordinal,
+            phase: self.phase,
+            start_value: self.start_value,
+            traversals: self.traversals,
+            complete_coordinate: self.complete_coordinate,
+            segment_index: self.segment_index,
+            resolved_segments: self.resolved_segments.as_ref().map(|parts| {
+                let mut result = Vec::with_capacity(parts.capacity());
+                result.extend_from_slice(parts);
+                result
+            }),
+        }
+    }
+
+    fn clone_from(&mut self, source: &Self) {
+        self.position.clone_from(&source.position);
+        self.ordinal = source.ordinal;
+        self.phase = source.phase;
+        self.start_value = source.start_value;
+        self.traversals = source.traversals;
+        self.complete_coordinate = source.complete_coordinate;
+        self.segment_index = source.segment_index;
+        match (&mut self.resolved_segments, &source.resolved_segments) {
+            (Some(target), Some(parts)) => target.clone_from(parts),
+            (target, parts) => target.clone_from(parts),
+        }
+    }
 }
 
 impl EnvelopeState {

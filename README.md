@@ -11,6 +11,12 @@ and nesting in Stages. Existing Segment timing is unchanged.
 
 Positive time constants honor the stage's `minimum_time_constant`; zero still
 skips the exponential phase and preserves the captured terminal fade.
+Rust callback hosts prepare `Envelope::prepare_commands(&mut state)` outside
+processing, then use `command_with_storage`. The same transactional evaluator
+reuses bounded continuation and scratch buffers, including after cloned host
+snapshots. Prepare storage again after deserializing a standalone state or
+changing its definition. The owning `command` API remains available outside
+real-time processing. Captured resolution never grows prepared buffers.
 Python and Rust share `conformance/captured-envelope.json`. Rust hosts using
 frame clocks set `clock_units_per_second` so rounding occurs in seconds before
 conversion to frame coordinates. Run `cargo test -p envelfo-core --features

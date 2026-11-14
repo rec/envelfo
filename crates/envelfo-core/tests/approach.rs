@@ -2,6 +2,9 @@ use envelfo_core::approach::ExponentialApproach;
 use envelfo_core::envelope::{Envelope, EnvelopeCommand, Segment};
 use envelfo_core::lfo::Command;
 use envelfo_core::time::Time;
+#[path = "support/allocations.rs"]
+mod allocations;
+use allocations::ALLOCATIONS;
 
 #[test]
 fn captured_release_matches_shared_vectors() {
@@ -117,4 +120,121 @@ fn positive_floor_does_not_turn_zero_time_into_an_approach() {
     let parts = stage.resolve(1.0).unwrap();
     assert_eq!(parts.len(), 1);
     assert_eq!(parts[0].duration, Some(Time::new(1, 20).unwrap()));
+}
+
+#[test]
+fn prepared_commands_preserve_capture_clones_and_transactionality_without_heap_operations() {
+    let mut body = Envelope::new(
+        1.0,
+        vec![Segment {
+            duration: Some(Time::ZERO),
+            to: 1.0,
+            curve: 0.0,
+            approach: None,
+        }],
+    )
+    .unwrap();
+    body.release = vec![Segment {
+        duration: Some(Time::ZERO),
+        to: 0.0,
+        curve: 0.0,
+        approach: Some(ExponentialApproach {
+            clock_units_per_second: Time::ONE,
+            asymptote: 0.0,
+            time_constant: 0.1 / 9.0,
+            minimum_time_constant: 0.006 / 9.0,
+            threshold: 0.0001,
+            transition_to: 0.0,
+            transition_seconds: 0.05,
+            minimum_transition_distance: 0.0001,
+        }),
+    }];
+    let mut actual = body.initial(Time::ZERO).unwrap();
+    let mut storage = body.prepare_commands(&mut actual).unwrap();
+    let initial = actual.clone();
+    let mut expected = actual.clone();
+    for (ordinal, (at, command)) in [
+        (Time::ZERO, Command::NoteOn),
+        (Time::new(1, 2).unwrap(), Command::NoteOff),
+        (Time::new(51, 100).unwrap(), Command::Pause),
+        (Time::new(52, 100).unwrap(), Command::Resume),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        body.command(
+            &mut expected,
+            at,
+            ordinal as u64,
+            EnvelopeCommand::Playback(command),
+        )
+        .unwrap();
+        ALLOCATIONS.set(Some(0));
+        let result = body.command_with_storage(
+            &mut actual,
+            &mut storage,
+            at,
+            ordinal as u64,
+            EnvelopeCommand::Playback(command),
+        );
+        let operations = ALLOCATIONS.replace(None).unwrap();
+        assert_eq!(operations, 0);
+        result.unwrap();
+        assert_eq!(actual, expected);
+        // Opaque host snapshots clone continuation and scratch outside processing.
+        actual = actual.clone();
+        storage = storage.clone();
+    }
+    let before = actual.clone();
+    ALLOCATIONS.set(Some(0));
+    let failed = body.command_with_storage(
+        &mut actual,
+        &mut storage,
+        Time::ZERO,
+        4,
+        EnvelopeCommand::Playback(Command::NoteOff),
+    );
+    let operations = ALLOCATIONS.replace(None).unwrap();
+    assert_eq!(operations, 0);
+    assert!(failed.is_err());
+    assert_eq!(actual, before);
+    ALLOCATIONS.set(Some(0));
+    actual.clone_from(&initial);
+    let result = body.command_with_storage(
+        &mut actual,
+        &mut storage,
+        Time::ZERO,
+        0,
+        EnvelopeCommand::Playback(Command::NoteOn),
+    );
+    let operations = ALLOCATIONS.replace(None).unwrap();
+    assert_eq!(operations, 0);
+    result.unwrap();
+    let before = actual.clone();
+    body.release[0].approach.as_mut().unwrap().time_constant = 1e300;
+    ALLOCATIONS.set(Some(0));
+    let result = body.command_with_storage(
+        &mut actual,
+        &mut storage,
+        Time::ONE,
+        1,
+        EnvelopeCommand::Playback(Command::NoteOff),
+    );
+    let operations = ALLOCATIONS.replace(None).unwrap();
+    assert_eq!(operations, 0);
+    assert!(result.is_err());
+    assert_eq!(actual, before);
+    body.release.resize(32, body.release[0].clone());
+    ALLOCATIONS.set(Some(0));
+    let result = body.command_with_storage(
+        &mut actual,
+        &mut storage,
+        Time::ONE,
+        1,
+        EnvelopeCommand::Playback(Command::NoteOff),
+    );
+    let operations = ALLOCATIONS.replace(None).unwrap();
+    assert_eq!(operations, 0);
+    assert_eq!(result, Err(envelfo_core::Error::Capacity));
+    assert_eq!(actual, before);
 }
