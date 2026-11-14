@@ -3,7 +3,7 @@ revision = 3
 requires-python = ">=3.13"
 
 [options]
-exclude-newer = "2026-10-28T14:01:56.348094Z"
+exclude-newer = "2026-11-07T12:20:09.289781Z"
 exclude-newer-span = "P1W"
 
 [[package]]
@@ -59,7 +59,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "meedee", marker = "extra == 'midi'", git = "https://github.com/rec/meedee?branch=main" },
-    { name = "ufor", git = "https://github.com/rec/ufor?branch=main" },
+    { name = "ufor", git = "https://github.com/rec/ufor?rev=8046380" },
 ]
 provides-extras = ["midi"]
 
@@ -422,7 +422,7 @@ wheels = [
 [[package]]
 name = "ufor"
 version = "0.2.0"
-source = { git = "https://github.com/rec/ufor?branch=main#2d3378a8ec8a8b09cda18256d306cc9031b82c04" }
+source = { git = "https://github.com/rec/ufor?rev=8046380#8046380a63b23ad4e2d6acf0a1880107efd8d3d0" }
 dependencies = [
     { name = "pydantic" },
     { name = "reccy" },
