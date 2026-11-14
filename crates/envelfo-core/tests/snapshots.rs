@@ -458,6 +458,7 @@ fn t(numerator: i64, denominator: i64) -> Time {
 
 fn segment(duration: Option<Time>, to: f64) -> Segment {
     Segment {
+        approach: None,
         duration,
         to,
         curve: 0.0,

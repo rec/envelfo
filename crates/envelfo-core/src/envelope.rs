@@ -1,5 +1,6 @@
 //! Normalized envelope definitions and exact attack/release playback.
 
+use crate::approach::{ExponentialApproach, resolve_segments};
 use crate::lfo::{Command, Direction, Value};
 use crate::playback::{Position, check_order};
 use crate::time::Time;
@@ -13,6 +14,12 @@ pub struct Segment {
     pub duration: Option<Time>,
     pub to: f64,
     pub curve: f64,
+    /// A captured stage; fixed fields must be zero-duration, terminal level, linear.
+    #[cfg_attr(
+        feature = "snapshots",
+        serde(default, skip_serializing_if = "Option::is_none")
+    )]
+    pub approach: Option<ExponentialApproach>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -111,6 +118,33 @@ impl Envelope {
             ));
         }
         validate_markers(&self.markers, true)?;
+        if self.captured() {
+            if self.indefinite() || !self.markers.is_empty() || self.playback != Playback::Once {
+                return Err(Error::InvalidDefinition(
+                    "captured envelopes require one-shot playback",
+                ));
+            }
+            for segment in self.segments.iter().chain(&self.release) {
+                if let Some(approach) = &segment.approach {
+                    approach.validate()?;
+                    if segment.duration != Some(Time::ZERO)
+                        || segment.to != approach.transition_to
+                        || segment.curve != 0.0
+                        || [
+                            approach.asymptote,
+                            approach.threshold,
+                            approach.transition_to,
+                        ]
+                        .iter()
+                        .any(|v| !valid_level(*v))
+                    {
+                        return Err(Error::InvalidDefinition(
+                            "invalid captured envelope segment",
+                        ));
+                    }
+                }
+            }
+        }
         if self.indefinite() && (!self.markers.is_empty() || self.playback != Playback::Once) {
             return Err(Error::InvalidDefinition(
                 "indefinite Envelope cannot use markers or repeated playback",
@@ -149,10 +183,15 @@ impl Envelope {
                 "current initial level requires a Stage entry",
             ));
         };
+        let resolved_segments = if self.captured() {
+            Some(resolve_segments(&self.segments, value)?)
+        } else {
+            None
+        };
         let rate = if self.indefinite() {
             Time::ONE
         } else {
-            rate(&self.segments)?
+            rate(resolved_segments.as_deref().unwrap_or(&self.segments))?
         };
         Ok(EnvelopeState {
             position: Position::new(
@@ -174,6 +213,7 @@ impl Envelope {
             traversals: 0,
             complete_coordinate: None,
             segment_index: 0,
+            resolved_segments,
         })
     }
 
@@ -185,7 +225,9 @@ impl Envelope {
                 status: Status::Idle,
             });
         }
-        let segments = if state.phase == Phase::Release {
+        let segments = if let Some(parts) = &state.resolved_segments {
+            parts
+        } else if state.phase == Phase::Release {
             &self.release
         } else {
             &self.segments
@@ -286,10 +328,15 @@ impl Envelope {
                     next.segment_index = 0;
                     next.position.coordinate = Time::ZERO;
                     next.position.age = Time::ZERO;
+                    next.resolved_segments = if self.captured() {
+                        Some(resolve_segments(&self.segments, next.start_value)?)
+                    } else {
+                        None
+                    };
                     next.position.rate = if self.indefinite() {
                         Time::ONE
                     } else {
-                        rate(&self.segments)?
+                        rate(next.resolved_segments.as_deref().unwrap_or(&self.segments))?
                     };
                 }
             }
@@ -303,10 +350,15 @@ impl Envelope {
                     next.segment_index = 0;
                     next.position.coordinate = Time::ZERO;
                     next.position.age = Time::ZERO;
+                    next.resolved_segments = if self.captured() {
+                        Some(resolve_segments(&self.release, next.start_value)?)
+                    } else {
+                        None
+                    };
                     next.position.rate = if self.indefinite() {
                         Time::ONE
                     } else {
-                        rate(&self.release)?
+                        rate(next.resolved_segments.as_deref().unwrap_or(&self.release))?
                     };
                 }
             }
@@ -369,12 +421,20 @@ impl Envelope {
             .any(|s| s.duration.is_none())
     }
 
+    pub fn captured(&self) -> bool {
+        self.segments
+            .iter()
+            .chain(&self.release)
+            .any(|s| s.approach.is_some())
+    }
+
     /// Release completion in the owning clock; None while a wait or pause prevents it.
     pub fn complete_at(&self, state: &EnvelopeState) -> Result<Option<Time>, Error> {
         if state.phase != Phase::Release {
             return Ok(None);
         }
-        let parts = &self.release[state.segment_index..];
+        let parts =
+            &state.resolved_segments.as_deref().unwrap_or(&self.release)[state.segment_index..];
         if parts.iter().any(|s| s.duration.is_none()) {
             return Ok(None);
         }
@@ -534,6 +594,7 @@ pub struct EnvelopeState {
     traversals: u64,
     complete_coordinate: Option<Time>,
     segment_index: usize,
+    resolved_segments: Option<Vec<Segment>>,
 }
 
 impl EnvelopeState {
@@ -556,6 +617,7 @@ pub(crate) mod snapshot {
         traversals: u64,
         complete_coordinate: Option<Time>,
         segment_index: usize,
+        resolved_segments: Option<Vec<Segment>>,
     }
 
     pub(crate) fn validate(body: &Envelope, state: &EnvelopeState) -> Result<(), Error> {
@@ -566,6 +628,16 @@ pub(crate) mod snapshot {
         } else {
             &body.segments
         };
+        let expected = if body.captured() {
+            Some(resolve_segments(parts, state.start_value)?)
+        } else {
+            None
+        };
+        if expected != state.resolved_segments {
+            return Err(Error::InvalidDefinition(
+                "invalid captured continuation segments",
+            ));
+        }
         if body.initial == Initial::Current
             || !state.start_value.is_finite()
             || state.start_value < if body.bipolar { -1.0 } else { 0.0 }

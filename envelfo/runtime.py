@@ -5,6 +5,7 @@ from math import ceil, floor
 from typing import Literal
 
 from ufor import control, envelfo, envelope, lfo, oscillator, segments
+from ufor.approach import ExponentialApproach, resolve_segments
 
 from . import random
 
@@ -58,6 +59,23 @@ def transform_value(
 def initial_envelfo(
     definition: envelfo.EnveLFO, at: Fraction, *, seed: int = 0
 ) -> envelfo.EnvelfoState:
+    if isinstance(definition, envelfo.Envelope) and _captured(definition):
+        assert isinstance(definition.initial, float)
+        parts = _resolve_phase(definition.segments, definition.initial)
+        body = definition.model_copy(
+            update={
+                'segments': parts,
+                'release': [segments.Segment(duration=0, to=definition.initial)]
+                if definition.release
+                else [],
+            }
+        )
+        state = initial_envelfo(body, at, seed=seed)
+        return state.model_copy(
+            update={
+                'runtime': state.runtime.model_copy(update={'resolved_segments': parts})
+            }
+        )
     if isinstance(definition, envelfo.SampleHold):
         random_state, word = random.random_word(seed)
         return envelfo.EnvelfoState(
@@ -107,7 +125,8 @@ def initial_envelfo(
                 update={
                     'coordinate': Fraction(1)
                     if not any(
-                        s.duration is None or s.duration for s in definition.segments
+                        not isinstance(s, segments.Segment) or s.duration
+                        for s in definition.segments
                     )
                     else Fraction(0)
                 }
@@ -119,6 +138,8 @@ def initial_envelfo(
 def envelfo_at(
     definition: envelfo.EnveLFO, state: envelfo.EnvelfoState, at: Fraction
 ) -> envelfo.EnvelfoValue:
+    if isinstance(definition, envelfo.Envelope) and _captured(definition):
+        return envelfo_at(resolved_envelope(definition, state), state, at)
     if isinstance(definition, envelfo.SampleHold) and isinstance(
         state.runtime, envelfo.SampleHoldState
     ):
@@ -172,6 +193,44 @@ def envelfo_event(
     state: envelfo.EnvelfoState,
     event: envelfo.EnvelfoEvent,
 ) -> envelfo.EnvelfoState:
+    if isinstance(definition, envelfo.Envelope) and _captured(definition):
+        runtime = state.runtime
+        assert isinstance(runtime, envelfo.EnvelopeState)
+        body = resolved_envelope(definition, state)
+        observed = envelfo_at(body, state, event.at)
+        parts = runtime.resolved_segments
+        if (
+            event.action == 'note_off'
+            and definition.release
+            and runtime.phase == 'on'
+            and observed.status != 'complete'
+        ):
+            parts = _resolve_phase(definition.release, observed.value)
+            body = body.model_copy(update={'release': parts})
+        elif (
+            event.action == 'start'
+            or event.action == 'note_on'
+            and definition.start == 'activation'
+        ) and (
+            observed.status not in ('running', 'held')
+            or definition.retrigger != envelope.Retrigger.ignore
+        ):
+            assert isinstance(definition.initial, float)
+            value = (
+                observed.value
+                if definition.retrigger == envelope.Retrigger.current
+                else definition.initial
+            )
+            parts = _resolve_phase(definition.segments, value)
+            body = body.model_copy(update={'segments': parts})
+        result = envelfo_event(body, state, event)
+        return result.model_copy(
+            update={
+                'runtime': result.runtime.model_copy(
+                    update={'resolved_segments': parts}
+                )
+            }
+        )
     if isinstance(definition, envelfo.SampleHold) and isinstance(
         state.runtime, envelfo.SampleHoldState
     ):
@@ -358,13 +417,15 @@ def envelope_complete_at(
     definition: envelfo.Envelope, state: envelfo.EnvelfoState
 ) -> Fraction | None:
     """Release completion in the owning clock, or None while completion is unbounded."""
+    if _captured(definition):
+        return envelope_complete_at(resolved_envelope(definition, state), state)
     runtime = state.runtime
     if not isinstance(runtime, envelfo.EnvelopeState):
         raise ValueError('Envelope completion requires Envelope state')
     if runtime.phase != 'release':
         return None
     parts = definition.release[runtime.segment_index :]
-    if any(s.duration is None for s in parts):
+    if any(isinstance(s, segments.IndefiniteSegment) for s in parts):
         return None
     total = sum(
         (s.duration for s in parts if isinstance(s, segments.Segment)), Fraction(0)
@@ -486,7 +547,10 @@ def next_stage_event(
         isinstance(stage, envelfo.Envelope)
         and _indefinite(stage)
         and not state.stage_done
-        and all(s.duration == 0 for s in stage.segments[state.segment_index :])
+        and all(
+            isinstance(s, segments.Segment) and s.duration == 0
+            for s in stage.segments[state.segment_index :]
+        )
     ):
         return (
             (state.at, 0, 'done')
@@ -502,7 +566,7 @@ def next_stage_event(
     if isinstance(stage, envelfo.Envelope):
         if _indefinite(stage):
             remaining = stage.segments[state.segment_index :]
-            if any(s.duration is None for s in remaining):
+            if any(isinstance(s, segments.IndefiniteSegment) for s in remaining):
                 return None
             target = sum(
                 (s.duration for s in remaining if isinstance(s, segments.Segment)),
@@ -623,10 +687,54 @@ def next_stage_event(
     )
 
 
+def resolved_envelope(
+    body: envelfo.Envelope, state: envelfo.EnvelfoState
+) -> envelfo.Envelope:
+    """Materialize the active phase from captured state for host block adapters."""
+    if not _captured(body):
+        return body
+    runtime = state.runtime
+    if (
+        not isinstance(runtime, envelfo.EnvelopeState)
+        or runtime.resolved_segments is None
+    ):
+        raise ValueError('captured Envelope requires resolved continuation state')
+    assert isinstance(body.initial, float)
+    return body.model_copy(
+        update={
+            'segments': runtime.resolved_segments
+            if runtime.phase != 'release'
+            else [segments.Segment(duration=0, to=body.initial)],
+            'release': runtime.resolved_segments
+            if runtime.phase == 'release'
+            else [segments.Segment(duration=0, to=body.initial)]
+            if body.release
+            else [],
+        }
+    )
+
+
+def _captured(body: envelfo.Envelope) -> bool:
+    return any(
+        isinstance(s, ExponentialApproach) for s in [*body.segments, *body.release]
+    )
+
+
+def _resolve_phase(
+    parts: list[segments.Segment | segments.IndefiniteSegment | ExponentialApproach],
+    initial: float,
+) -> list[segments.Segment]:
+    if any(isinstance(s, segments.IndefiniteSegment) for s in parts):
+        raise ValueError('captured envelopes cannot contain indefinite holds')
+    return resolve_segments(
+        [s for s in parts if not isinstance(s, segments.IndefiniteSegment)], initial
+    )
+
+
 def _envelope_rate(
-    parts: list[segments.Segment | segments.IndefiniteSegment],
+    parts: list[segments.Segment | segments.IndefiniteSegment | ExponentialApproach],
 ) -> Fraction:
-    if any(s.duration is None for s in parts):
+    if any(isinstance(s, segments.IndefiniteSegment) for s in parts):
         return Fraction(1)
     duration = sum(
         (s.duration for s in parts if isinstance(s, segments.Segment)), Fraction(0)
@@ -721,11 +829,14 @@ def _initial_position(
 
 
 def _indefinite(body: envelfo.Envelope) -> bool:
-    return any(s.duration is None for s in [*body.segments, *body.release])
+    return any(
+        isinstance(s, segments.IndefiniteSegment)
+        for s in [*body.segments, *body.release]
+    )
 
 
 def _segment_value(
-    parts: list[segments.Segment | segments.IndefiniteSegment],
+    parts: list[segments.Segment | segments.IndefiniteSegment | ExponentialApproach],
     index: int,
     initial: float,
     elapsed: Fraction,
@@ -733,6 +844,8 @@ def _segment_value(
     value = initial
     elapsed = max(Fraction(0), elapsed)
     for offset, part in enumerate(parts[index:], index):
+        if isinstance(part, ExponentialApproach):
+            raise ValueError('captured stage must be resolved before observation')
         if isinstance(part, segments.IndefiniteSegment):
             return value, 'held', offset
         if elapsed < part.duration:
@@ -749,7 +862,7 @@ def _segment_value(
 
 
 def _advance_segment(
-    parts: list[segments.Segment | segments.IndefiniteSegment],
+    parts: list[segments.Segment | segments.IndefiniteSegment | ExponentialApproach],
     index: int,
     initial: float,
     elapsed: Fraction,

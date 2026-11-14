@@ -1,0 +1,17 @@
+{
+  "stage": {
+    "kind": "exponential_approach",
+    "asymptote": 0.0,
+    "time_constant": 1.0,
+    "threshold": 0.5,
+    "transition_to": 0.0,
+    "transition_seconds": 0.05,
+    "minimum_transition_distance": 0.5
+  },
+  "cases": [
+    {"initial": 1.0, "durations_ns": [693147181, 50000000], "midpoint": 0.7071067811865476},
+    {"initial": 0.5, "durations_ns": [50000000], "midpoint": 0.25},
+    {"initial": 0.25, "durations_ns": [25000000], "midpoint": 0.125},
+    {"initial": 0.0, "durations_ns": [0], "midpoint": 0.0}
+  ]
+}

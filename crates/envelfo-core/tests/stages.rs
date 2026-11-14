@@ -190,6 +190,7 @@ fn finite_repeat_boundary_transition_wins_over_obsolete_completion_transition() 
             Envelope::new(
                 0.5,
                 vec![Segment {
+                    approach: None,
                     duration: None,
                     to: 0.0,
                     curve: 0.0,
@@ -383,6 +384,7 @@ fn stage_definitions_reject_unknown_transitions_and_reserved_markers() {
                 Envelope::new(
                     0.25,
                     vec![Segment {
+                        approach: None,
                         duration: None,
                         to: 0.0,
                         curve: 0.0,
@@ -455,6 +457,7 @@ fn ramp() -> Envelope {
     Envelope::new(
         0.0,
         vec![Segment {
+            approach: None,
             duration: Some(Time::ONE),
             to: 1.0,
             curve: 0.0,

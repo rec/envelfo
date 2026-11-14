@@ -139,6 +139,7 @@ fn arpeg() -> Patch {
     let mut envelope = Envelope::new(
         0.0,
         vec![Segment {
+            approach: None,
             duration: Some(Time::new(1, 4).unwrap()),
             to: 1.0,
             curve: 0.0,

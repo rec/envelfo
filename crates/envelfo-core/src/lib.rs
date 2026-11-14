@@ -12,6 +12,7 @@
 //! ```
 #![forbid(unsafe_code)]
 
+pub mod approach;
 pub mod envelope;
 pub mod lfo;
 pub mod patch;

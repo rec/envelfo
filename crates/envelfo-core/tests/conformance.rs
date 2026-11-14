@@ -404,6 +404,7 @@ fn envelope(body: &Value) -> Envelope {
             .map(|v| {
                 v.iter()
                     .map(|s| Segment {
+                        approach: None,
                         duration: s["duration"]
                             .as_str()
                             .map(|v| v.strip_suffix(" s").unwrap().parse().unwrap()),

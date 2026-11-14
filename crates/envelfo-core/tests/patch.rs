@@ -1215,6 +1215,7 @@ fn staged_patch() -> Patch {
                     Envelope::new(
                         0.0,
                         vec![Segment {
+                            approach: None,
                             duration: Some(t(1, 2)),
                             to: 1.0,
                             curve: 0.0,
@@ -1229,6 +1230,7 @@ fn staged_patch() -> Patch {
                     Envelope::new(
                         0.0,
                         vec![Segment {
+                            approach: None,
                             duration: None,
                             to: 0.0,
                             curve: 0.0,
@@ -1253,6 +1255,7 @@ fn staged_patch() -> Patch {
                     Envelope::new(
                         0.0,
                         vec![Segment {
+                            approach: None,
                             duration: None,
                             to: 0.0,
                             curve: 0.0,
@@ -1267,6 +1270,7 @@ fn staged_patch() -> Patch {
                     Envelope::new(
                         1.0,
                         vec![Segment {
+                            approach: None,
                             duration: Some(t(1, 10)),
                             to: 1.0,
                             curve: 0.0,
@@ -1313,6 +1317,7 @@ fn attack() -> Envelope {
     let mut envelope = Envelope::new(
         0.0,
         vec![Segment {
+            approach: None,
             duration: Some(t(1, 2)),
             to: 1.0,
             curve: 0.0,

@@ -76,6 +76,7 @@ fn zero_length_segments_apply_immediately_and_curves_stay_finite() {
             vec![
                 segment(Time::ZERO, 0.25),
                 Segment {
+                    approach: None,
                     duration: Some(Time::ONE),
                     to: 1.0,
                     curve,
@@ -281,6 +282,7 @@ fn ramp() -> Envelope {
 }
 fn segment(duration: Time, to: f64) -> Segment {
     Segment {
+        approach: None,
         duration: Some(duration),
         to,
         curve: 0.0,

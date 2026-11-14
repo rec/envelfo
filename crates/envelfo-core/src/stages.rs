@@ -180,7 +180,8 @@ impl Stages {
                 }
                 Body::Envelope(c) => {
                     c.validate()?;
-                    if !stage.markers.is_empty()
+                    if c.captured()
+                        || !stage.markers.is_empty()
                         || !c.release.is_empty()
                         || c.start == Start::Event
                         || (!c.indefinite() && duration(&c.segments)? == Time::ZERO)

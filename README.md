@@ -1,5 +1,19 @@
 # enveLFO
 
+One-shot seconds-clock Envelopes also support uFor's `exponential_approach`
+stage. Entry captures the phase level and resolves the stage to ordinary curved
+and linear segments, with derived durations rounded once to nearest nanoseconds
+(ties to even). Python continuation state and Rust snapshots retain the resolved
+sequence. Hosts sampling blocks use `runtime.resolved_envelope` rather than the
+unresolved authored list. The original authored phase stays in the definition.
+Captured stages reject normalized markers, repeated playback, indefinite holds
+and nesting in Stages. Existing Segment timing is unchanged.
+
+Python and Rust share `conformance/captured-envelope.json`. Rust hosts using
+frame clocks set `clock_units_per_second` so rounding occurs in seconds before
+conversion to frame coordinates. Run `cargo test -p envelfo-core --features
+snapshots` for native conformance and continuation checks.
+
 Envelope segments may have `duration: null`: they hold the incoming level until
 an explicit `advance` command enters the next segment. There is no destination
 or curve on an indefinite segment. Note-off bypasses attack/sustain waits and

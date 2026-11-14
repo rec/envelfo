@@ -9,6 +9,7 @@ fn waiting() -> Envelope {
     Envelope::new(
         0.7,
         vec![Segment {
+            approach: None,
             duration: None,
             to: 0.0,
             curve: 0.0,
@@ -22,11 +23,13 @@ fn release_completion_tracks_waits_and_playback_commands() {
     let mut body = waiting();
     body.release = vec![
         Segment {
+            approach: None,
             duration: None,
             to: 0.0,
             curve: 0.0,
         },
         Segment {
+            approach: None,
             duration: Some(Time::ONE),
             to: 0.0,
             curve: 0.0,
@@ -85,6 +88,7 @@ fn release_completion_tracks_waits_and_playback_commands() {
 fn release_bypasses_wait_and_invalid_commands_preserve_state() {
     let mut body = waiting();
     body.release = vec![Segment {
+        approach: None,
         duration: Some(Time::ONE),
         to: 0.0,
         curve: 0.0,
@@ -231,6 +235,7 @@ fn patch_host_can_advance_a_waiting_child() {
     for staged in [false, true] {
         let mut envelope = waiting();
         envelope.segments.push(Segment {
+            approach: None,
             duration: Some(Time::ONE),
             to: 0.0,
             curve: 0.0,
