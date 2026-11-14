@@ -12,6 +12,7 @@ fn captured_release_matches_shared_vectors() {
         clock_units_per_second: Time::ONE,
         asymptote: source["asymptote"].as_f64().unwrap(),
         time_constant: source["time_constant"].as_f64().unwrap(),
+        minimum_time_constant: 0.0,
         threshold: source["threshold"].as_f64().unwrap(),
         transition_to: source["transition_to"].as_f64().unwrap(),
         transition_seconds: source["transition_seconds"].as_f64().unwrap(),
@@ -95,4 +96,25 @@ fn captured_release_matches_shared_vectors() {
             }
         }
     }
+}
+
+#[test]
+fn positive_floor_does_not_turn_zero_time_into_an_approach() {
+    let mut stage = ExponentialApproach {
+        clock_units_per_second: Time::ONE,
+        asymptote: 0.0,
+        time_constant: 0.001,
+        minimum_time_constant: 0.001,
+        threshold: 0.0001,
+        transition_to: 0.0,
+        transition_seconds: 0.05,
+        minimum_transition_distance: 0.0001,
+    };
+    let expected = stage.resolve(1.0).unwrap();
+    stage.time_constant = 0.00001;
+    assert_eq!(stage.resolve(1.0).unwrap(), expected);
+    stage.time_constant = 0.0;
+    let parts = stage.resolve(1.0).unwrap();
+    assert_eq!(parts.len(), 1);
+    assert_eq!(parts[0].duration, Some(Time::new(1, 20).unwrap()));
 }

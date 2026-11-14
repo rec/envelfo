@@ -12,6 +12,8 @@ pub struct ExponentialApproach {
     pub clock_units_per_second: Time,
     pub asymptote: f64,
     pub time_constant: f64,
+    #[cfg_attr(feature = "snapshots", serde(default))]
+    pub minimum_time_constant: f64,
     pub threshold: f64,
     pub transition_to: f64,
     pub transition_seconds: f64,
@@ -23,6 +25,7 @@ impl ExponentialApproach {
         if [
             self.asymptote,
             self.time_constant,
+            self.minimum_time_constant,
             self.threshold,
             self.transition_to,
             self.transition_seconds,
@@ -32,6 +35,7 @@ impl ExponentialApproach {
         .any(|v| !v.is_finite())
             || self.threshold == self.asymptote
             || self.time_constant < 0.0
+            || self.minimum_time_constant < 0.0
             || self.transition_seconds < 0.0
             || self.minimum_transition_distance < 0.0
             || self.clock_units_per_second <= Time::ZERO
@@ -53,7 +57,7 @@ impl ExponentialApproach {
             let curve = (distance / (initial - self.asymptote)).ln();
             result.push(Segment {
                 duration: Some(
-                    seconds(-self.time_constant * curve)?
+                    seconds(-self.time_constant.max(self.minimum_time_constant) * curve)?
                         .checked_mul(self.clock_units_per_second)?,
                 ),
                 to: self.threshold,

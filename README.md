@@ -9,6 +9,8 @@ unresolved authored list. The original authored phase stays in the definition.
 Captured stages reject normalized markers, repeated playback, indefinite holds
 and nesting in Stages. Existing Segment timing is unchanged.
 
+Positive time constants honor the stage's `minimum_time_constant`; zero still
+skips the exponential phase and preserves the captured terminal fade.
 Python and Rust share `conformance/captured-envelope.json`. Rust hosts using
 frame clocks set `clock_units_per_second` so rounding occurs in seconds before
 conversion to frame coordinates. Run `cargo test -p envelfo-core --features
