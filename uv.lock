@@ -59,7 +59,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "meedee", marker = "extra == 'midi'", git = "https://github.com/rec/meedee?branch=main" },
-    { name = "ufor", git = "https://github.com/rec/ufor?rev=8046380" },
+    { name = "ufor", git = "https://github.com/rec/ufor?rev=eac3270" },
 ]
 provides-extras = ["midi"]
 
@@ -422,7 +422,7 @@ wheels = [
 [[package]]
 name = "ufor"
 version = "0.2.0"
-source = { git = "https://github.com/rec/ufor?rev=8046380#8046380a63b23ad4e2d6acf0a1880107efd8d3d0" }
+source = { git = "https://github.com/rec/ufor?rev=eac3270#eac3270c5d7acaa21452ee219ad0c314da297b2d" }
 dependencies = [
     { name = "pydantic" },
     { name = "reccy" },
