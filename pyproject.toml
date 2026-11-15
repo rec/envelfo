@@ -31,7 +31,7 @@ build-backend = "hatchling.build"
 
 [tool.uv.sources]
 meedee = { git = "https://github.com/rec/meedee", branch = "main" }
-ufor = { git = "https://github.com/rec/ufor", rev = "9304264146e2bbed07a738f44ff50a075444f7ff" }
+ufor = { git = "https://github.com/rec/ufor", rev = "d9a0a5cdaf7ecafc476452a29808b9358113dcde" }
 reccy = { git = "https://github.com/rec/reccy.git", branch = "main" }
 
 [tool.pytest.ini_options]
