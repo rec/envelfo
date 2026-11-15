@@ -1,4 +1,5 @@
 use envelfo_core::Error;
+use envelfo_core::approach::ExponentialApproach;
 use envelfo_core::envelope::{Envelope, Segment, Start};
 use envelfo_core::lfo::{Command, LFO, Shape};
 use envelfo_core::patch::{
@@ -14,6 +15,149 @@ use envelfo_core::time::Time;
 #[path = "support/allocations.rs"]
 mod allocations;
 use allocations::ALLOCATIONS;
+
+fn captured_patch() -> Patch {
+    let envelope = Envelope::new(
+        0.0,
+        vec![Segment {
+            duration: Some(Time::ZERO),
+            to: 1.0,
+            curve: 0.0,
+            approach: Some(ExponentialApproach {
+                clock_units_per_second: Time::ONE,
+                asymptote: 1.0,
+                time_constant: 0.1,
+                minimum_time_constant: 0.0,
+                threshold: 0.8,
+                transition_to: 1.0,
+                transition_seconds: 0.01,
+                minimum_transition_distance: 0.0,
+            }),
+        }],
+    )
+    .unwrap();
+    Patch {
+        children: vec![child("envelope", Node::Envelope(envelope))],
+        outputs: vec![output("value", "envelope")],
+        event_outputs: vec![],
+        connections: vec![],
+    }
+}
+
+#[test]
+fn captured_patch_observations_reuse_storage_across_cloned_continuations_and_errors() {
+    let body = captured_patch();
+    let mut expected = body
+        .initial(Time::ZERO, "capture", 0, None, &Seconds)
+        .unwrap();
+    let mut actual = expected.clone();
+    let mut storage = body.prepare_storage(&mut actual, 8, 8).unwrap();
+    for i in 0..32 {
+        if i == 8 {
+            actual = actual.clone();
+            storage = storage.clone();
+        }
+        let at = t(i, 100);
+        let next = t(i + 1, 100);
+        let result = body.advance(&mut expected, at, next, &Seconds).unwrap();
+        ALLOCATIONS.set(Some(0));
+        let observed = body.advance_into(&mut actual, at, next, &Seconds, &mut storage);
+        let operations = ALLOCATIONS.replace(None).unwrap();
+        assert_eq!(operations, 0);
+        observed.unwrap();
+        assert_eq!(actual, expected);
+        assert_eq!(storage.values().next(), Some(result.values["value"]));
+    }
+    let before = actual.clone();
+    ALLOCATIONS.set(Some(0));
+    let rejected = body.advance_into(&mut actual, Time::ZERO, Time::ONE, &Seconds, &mut storage);
+    let operations = ALLOCATIONS.replace(None).unwrap();
+    assert_eq!(operations, 0);
+    assert_eq!(rejected, Err(Error::TimeReversed));
+    assert_eq!(actual, before);
+}
+
+#[test]
+fn captured_patch_commands_and_reset_reuse_prepared_envelope_storage() {
+    let mut body = captured_patch();
+    let Node::Envelope(envelope) = &mut body.children[0].node else {
+        unreachable!()
+    };
+    let mut release = envelope.segments[0].clone();
+    release.to = 0.0;
+    let approach = release.approach.as_mut().unwrap();
+    approach.asymptote = 0.0;
+    approach.threshold = 0.01;
+    approach.transition_to = 0.0;
+    envelope.release = vec![release];
+    let mut expected = body
+        .initial(Time::ZERO, "capture", 0, None, &Seconds)
+        .unwrap();
+    let mut actual = expected.clone();
+    let mut storage = body.prepare_storage(&mut actual, 8, 8).unwrap();
+    for (ordinal, (at, command)) in [
+        (Time::ZERO, Command::NoteOn),
+        (t(1, 20), Command::NoteOff),
+        (t(6, 100), Command::Pause),
+        (t(7, 100), Command::Resume),
+        (t(8, 100), Command::NoteOn),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let event = event(at, ordinal as u64, ChildCommand::Playback(command));
+        body.command(&mut expected, "envelope", &event, &Seconds, true)
+            .unwrap();
+        let borrowed = ChildEvent {
+            at,
+            ordinal: ordinal as u64,
+            command: ChildCommand::<&str>::Playback(command),
+        };
+        ALLOCATIONS.set(Some(0));
+        let result = body.command_into(
+            &mut actual,
+            "envelope",
+            &borrowed,
+            &Seconds,
+            true,
+            &mut storage,
+        );
+        let operations = ALLOCATIONS.replace(None).unwrap();
+        assert_eq!(operations, 0);
+        result.unwrap();
+        assert_eq!(actual, expected);
+    }
+    let before = actual.clone();
+    let event = ChildEvent {
+        at: Time::ZERO,
+        ordinal: 99,
+        command: ChildCommand::<&str>::Playback(Command::NoteOff),
+    };
+    ALLOCATIONS.set(Some(0));
+    let failed = body.command_into(
+        &mut actual,
+        "envelope",
+        &event,
+        &Seconds,
+        true,
+        &mut storage,
+    );
+    let operations = ALLOCATIONS.replace(None).unwrap();
+    assert_eq!(operations, 0);
+    assert_eq!(failed, Err(Error::TimeReversed));
+    assert_eq!(actual, before);
+    actual = actual.clone();
+    storage = storage.clone();
+    for at in [Time::ONE, t(5, 2)] {
+        let expected = body.initial(at, "capture", 123, None, &Seconds).unwrap();
+        ALLOCATIONS.set(Some(0));
+        let result = body.reset_into(&mut actual, at, 123, None, &Seconds, &mut storage);
+        let operations = ALLOCATIONS.replace(None).unwrap();
+        assert_eq!(operations, 0);
+        result.unwrap();
+        assert_eq!(actual, expected);
+    }
+}
 
 #[test]
 fn prepared_voice_reset_matches_fresh_initialization_without_heap_operations() {

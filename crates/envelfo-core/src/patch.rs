@@ -26,8 +26,8 @@ use std::sync::Arc;
 
 use crate::Error;
 use crate::envelope::{
-    Envelope, EnvelopeCommand, EnvelopeState, Initial, Marker, Playback, Retrigger, Start,
-    validate_markers,
+    Envelope, EnvelopeCommand, EnvelopeCommandStorage, EnvelopeState, Initial, Marker, Playback,
+    Retrigger, Start, validate_markers,
 };
 use crate::lfo::{Command, Driver, LFO, LFOState};
 use crate::random::{random_word, stream_key};
@@ -384,7 +384,14 @@ impl Patch {
                     .and_then(|k| k.samples.get(&child.name))
                     .copied()
                     .unwrap_or(storage.scratch.sample_keys[i]);
-                storage.next.children[i] = initial_child(&child.node, local, seed ^ sample_key)?;
+                if let (Some(ChildState::Envelope(current)), Some(prepared)) =
+                    (&mut storage.next.children[i], &storage.scratch.envelopes[i])
+                {
+                    current.reset_from(&prepared.initial, local);
+                } else {
+                    storage.next.children[i] =
+                        initial_child(&child.node, local, seed ^ sample_key)?;
+                }
             }
             storage.next.at = at;
             storage.next.cursor = at;
@@ -418,7 +425,7 @@ impl Patch {
         if pending_capacity > 4096 || state.pending.len() > pending_capacity {
             return Err(Error::PendingCapacity);
         }
-        let mut scratch = Scratch::new(self, state);
+        let mut scratch = Scratch::new(self, state)?;
         scratch.pending_limit = Some(pending_capacity);
         for pending in &mut state.pending {
             pending.action = Arc::clone(&scratch.actions[pending.order]);
@@ -647,7 +654,7 @@ impl Patch {
             return Err(Error::TimeReversed);
         }
         let mut next = state.clone();
-        let mut scratch = Scratch::new(self, state);
+        let mut scratch = Scratch::new(self, &mut next)?;
         let mut events = OwnedEvents(Vec::new());
         self.run(&mut next, at, true, clock, &mut scratch, &mut events)?;
         self.observe(
@@ -753,7 +760,7 @@ impl Patch {
         }
         let target = self.index(target)?;
         let mut next = state.clone();
-        let mut scratch = Scratch::new(self, state);
+        let mut scratch = Scratch::new(self, &mut next)?;
         let mut emitted = OwnedEvents(Vec::new());
         self.run(
             &mut next,
@@ -785,7 +792,7 @@ impl Patch {
             return Err(Error::TimeReversed);
         }
         let mut next = state.clone();
-        let mut scratch = Scratch::new(self, state);
+        let mut scratch = Scratch::new(self, &mut next)?;
         let mut events = OwnedEvents(Vec::new());
         self.run(&mut next, at, inclusive, clock, &mut scratch, &mut events)?;
         next.at = at;
@@ -1088,7 +1095,13 @@ impl Patch {
                     ChildCommand::Playback(c) => EnvelopeCommand::Playback(*c),
                     _ => return Err(Error::Unsupported("unsupported Envelope command")),
                 };
-                body.command(current, local, event.ordinal, command)?;
+                body.command_with_storage(
+                    current,
+                    &mut scratch.envelopes[target].as_mut().unwrap().commands,
+                    local,
+                    event.ordinal,
+                    command,
+                )?;
             }
             (Node::SampleHold(body), ChildState::Sample(current), command) => {
                 let command = match command {
@@ -1330,7 +1343,7 @@ impl Patch {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Debug, PartialEq)]
 #[cfg_attr(feature = "snapshots", derive(serde::Serialize, serde::Deserialize))]
 enum ChildState {
     Lfo(#[cfg_attr(feature = "snapshots", serde(with = "crate::lfo::snapshot::State"))] LFOState),
@@ -1354,9 +1367,37 @@ enum ChildState {
     ),
 }
 
+impl Clone for ChildState {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Lfo(state) => Self::Lfo(state.clone()),
+            Self::Envelope(state) => Self::Envelope(state.clone()),
+            Self::Stages(state) => Self::Stages(state.clone()),
+            Self::Sample(state) => Self::Sample(state.clone()),
+        }
+    }
+
+    fn clone_from(&mut self, source: &Self) {
+        match (self, source) {
+            (Self::Lfo(target), Self::Lfo(source)) => target.clone_from(source),
+            (Self::Envelope(target), Self::Envelope(source)) => target.clone_from(source),
+            (Self::Stages(target), Self::Stages(source)) => target.clone_from(source),
+            (Self::Sample(target), Self::Sample(source)) => target.clone_from(source),
+            (target, source) => *target = source.clone(),
+        }
+    }
+}
+
+#[derive(Clone)]
+struct PreparedEnvelope {
+    initial: EnvelopeState,
+    commands: EnvelopeCommandStorage,
+}
+
 /// Working storage shared by every scheduler phase in one transaction. Preparing
 /// it allocates; processing Stage events and queued cues reuses these buffers.
 struct Scratch {
+    envelopes: Vec<Option<PreparedEnvelope>>,
     pending_limit: Option<usize>,
     signals: Vec<Option<f64>>,
     edges: Vec<(usize, &'static str)>,
@@ -1372,6 +1413,7 @@ struct Scratch {
 impl Clone for Scratch {
     fn clone(&self) -> Self {
         Self {
+            envelopes: self.envelopes.clone(),
             pending_limit: self.pending_limit,
             signals: self.signals.clone(),
             edges: clone_buffer(&self.edges),
@@ -1393,7 +1435,20 @@ fn clone_buffer<T: Clone>(source: &Vec<T>) -> Vec<T> {
 }
 
 impl Scratch {
-    fn new(patch: &Patch, state: &PatchState) -> Self {
+    fn new(patch: &Patch, state: &mut PatchState) -> Result<Self, Error> {
+        let mut envelopes = Vec::with_capacity(patch.children.len());
+        for (child, current) in patch.children.iter().zip(&mut state.children) {
+            envelopes.push(match (&child.node, current) {
+                (Node::Envelope(body), Some(ChildState::Envelope(current))) => {
+                    let commands = body.prepare_commands(current)?;
+                    let mut initial = body.initial(Time::ZERO)?;
+                    // Reuse the prepared command capacity for a fresh voice too.
+                    drop(body.prepare_commands(&mut initial)?);
+                    Some(PreparedEnvelope { initial, commands })
+                }
+                _ => None,
+            });
+        }
         let mut names: Vec<String> = ["done", "stage.done", "cycle", "turned"]
             .into_iter()
             .map(str::to_owned)
@@ -1447,7 +1502,8 @@ impl Scratch {
                 stream_key(0, &format!("{target}:{command}"))
             })
             .collect();
-        Self {
+        Ok(Self {
+            envelopes,
             sample_keys: patch
                 .children
                 .iter()
@@ -1486,7 +1542,7 @@ impl Scratch {
                 .map(|c| Arc::new(c.action.clone()))
                 .collect(),
             keys,
-        }
+        })
     }
 }
 

@@ -692,6 +692,11 @@ impl Clone for EnvelopeState {
 }
 
 impl EnvelopeState {
+    pub(crate) fn reset_from(&mut self, initial: &Self, at: Time) {
+        self.clone_from(initial);
+        self.position.at = at;
+    }
+
     pub fn phase(&self) -> Phase {
         self.phase
     }

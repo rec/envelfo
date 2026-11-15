@@ -1,5 +1,21 @@
 # Rust performance and allocation audit
 
+## Prepared captured-envelope transactions
+
+The bounded Patch API reuses captured Envelope continuation buffers when copying
+transaction state. `ChildState::clone_from` delegates to the contained state's
+buffer-reusing implementation rather than the allocating derived enum clone.
+Patch scratch also owns prepared Envelope command storage and initial states,
+so start, release, playback commands and voice reset reuse those buffers.
+Public Patch APIs and snapshot representations are unchanged. Preparation and
+snapshot cloning allocate outside processing; cloned scratch preserves capacity.
+
+The captured Patch regressions compare bounded and owning execution, including
+commands, reset at new host times, cloned continuation and error rollback, while
+counting allocations, reallocations and deallocations around each bounded call.
+They require zero heap operations. This is separate from the owning-API timing
+benchmarks below.
+
 Measured on macOS arm64 with Homebrew Rust 1.99.0. These are local steady-state
 microbenchmarks, not portable latency promises or allocation-free callback claims.
 
