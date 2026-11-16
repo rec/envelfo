@@ -1,16 +1,13 @@
 # MIDI output from named observations
 
-The optional Python `envelfo.midi` module and Rust `envelfo-midi` crate map already
+The optional Python `envelfo.midi` module and Rust `engelfo::midi` module map already
 observed named values to meedee MIDI 1.0 messages. They do not acquire time,
 advance a Patch, send MIDI, own connections, or start threads. Observation times
-and delivery remain host responsibilities. Core enveLFO imports and the default
-Rust workspace member remain free of meedee and native MIDI build requirements.
+and delivery remain host responsibilities. Base Python enveLFO imports remain
+free of meedee; the single Rust `engelfo` crate includes MIDI mapping.
 
-Install Python support with `uv sync --extra midi`. The optional Rust crate uses
-meedee from HTTPS/main, requiring Rust 1.87, CMake and a C++20 compiler. Linux
-source builds additionally require ALSA headers and pkg-config. For example,
-Debian/Ubuntu uses `libasound2-dev` and `pkg-config`. The standalone core retains
-Rust 1.85. No CLI or audio-device host is added.
+Install Python support with `uv sync --extra midi`. Rust uses the MIDI dependency
+declared in the root Cargo manifest. No CLI or audio-device host is added.
 
 ## Mapping contract
 
@@ -160,8 +157,8 @@ cover foreign/stale batches, malformed configuration and non-finite values.
 
 ```bash
 uv run --frozen --extra midi pytest
-CARGO_HOME="$PWD/target/cargo-home" cargo test -p envelfo-midi --locked
-CARGO_HOME="$PWD/target/cargo-home" cargo test -p envelfo-midi --locked --release
+cargo test --locked
+cargo test --locked --release
 ```
 
 For authorized macOS qualification, invoke this as a standalone command:

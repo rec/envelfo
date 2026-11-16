@@ -1,15 +1,15 @@
 #![cfg(feature = "snapshots")]
 
-use envelfo_core::envelope::{Envelope, EnvelopeCommand, Marker, Playback, Segment};
-use envelfo_core::lfo::{Command, LFO};
-use envelfo_core::patch::{
+use engelfo::envelope::{Envelope, EnvelopeCommand, Marker, Playback, Segment};
+use engelfo::lfo::{Command, LFO};
+use engelfo::patch::{
     Child, Connection, ConnectionAction, Node, Output, Patch, Port, Seconds, StreamKeys,
 };
-use envelfo_core::sample_hold::{SampleCommand, SampleHold};
-use envelfo_core::signal::Operator;
-use envelfo_core::snapshot::{Error, Snapshot};
-use envelfo_core::stages::{Action, Body, Event, Stage, StageCommand, Stages, Transition};
-use envelfo_core::time::Time;
+use engelfo::sample_hold::{SampleCommand, SampleHold};
+use engelfo::signal::Operator;
+use engelfo::snapshot::{Error, Snapshot};
+use engelfo::stages::{Action, Body, Event, Stage, StageCommand, Stages, Transition};
+use engelfo::time::Time;
 use serde_json::{Value, json};
 
 #[test]

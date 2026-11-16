@@ -1,6 +1,6 @@
-use envelfo_core::Error;
-use envelfo_core::signal::Operator;
-use envelfo_core::time::Time;
+use engelfo::Error;
+use engelfo::signal::Operator;
+use engelfo::time::Time;
 use std::collections::BTreeMap;
 
 #[test]

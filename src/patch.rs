@@ -1,10 +1,10 @@
 //! Host-observed signal graphs and exact, bounded connection scheduling.
 //!
 //! ```
-//! use envelfo_core::lfo::{LFO, Shape};
-//! use envelfo_core::patch::{Child, Node, Output, Patch, Seconds};
-//! use envelfo_core::time::Time;
-//! # fn main() -> Result<(), envelfo_core::Error> {
+//! use engelfo::lfo::{LFO, Shape};
+//! use engelfo::patch::{Child, Node, Output, Patch, Seconds};
+//! use engelfo::time::Time;
+//! # fn main() -> Result<(), engelfo::Error> {
 //! let mut lfo = LFO::new(Time::ONE)?;
 //! lfo.shape = Shape::Triangle;
 //! let patch = Patch {

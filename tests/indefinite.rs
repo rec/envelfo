@@ -1,9 +1,9 @@
-use envelfo_core::Status;
-use envelfo_core::envelope::{Envelope, EnvelopeCommand, Segment};
-use envelfo_core::lfo::Command;
-use envelfo_core::patch::{Child, ChildCommand, ChildEvent, Node, Output, Patch, Seconds};
-use envelfo_core::stages::{Action, Body, Event, Stage, StageCommand, Stages, Transition};
-use envelfo_core::time::Time;
+use engelfo::Status;
+use engelfo::envelope::{Envelope, EnvelopeCommand, Segment};
+use engelfo::lfo::Command;
+use engelfo::patch::{Child, ChildCommand, ChildEvent, Node, Output, Patch, Seconds};
+use engelfo::stages::{Action, Body, Event, Stage, StageCommand, Stages, Transition};
+use engelfo::time::Time;
 
 fn waiting() -> Envelope {
     Envelope::new(

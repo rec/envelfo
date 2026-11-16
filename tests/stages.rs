@@ -1,8 +1,8 @@
-use envelfo_core::envelope::{Envelope, Initial, Marker, Playback, Segment};
-use envelfo_core::lfo::{Command, LFO, Shape};
-use envelfo_core::stages::{Action, Body, Event, Stage, StageCommand, Stages, Transition};
-use envelfo_core::time::Time;
-use envelfo_core::{Error, Status};
+use engelfo::envelope::{Envelope, Initial, Marker, Playback, Segment};
+use engelfo::lfo::{Command, LFO, Shape};
+use engelfo::stages::{Action, Body, Event, Stage, StageCommand, Stages, Transition};
+use engelfo::time::Time;
+use engelfo::{Error, Status};
 #[path = "support/allocations.rs"]
 mod allocations;
 use allocations::ALLOCATIONS;
@@ -406,7 +406,7 @@ fn stage_definitions_reject_unknown_transitions_and_reserved_markers() {
 
 fn send(
     body: &Stages,
-    state: &mut envelfo_core::stages::StageState,
+    state: &mut engelfo::stages::StageState,
     at: Time,
     ordinal: u64,
     command: Command,
@@ -422,7 +422,7 @@ fn send(
     )
     .unwrap();
 }
-fn ports(events: &[envelfo_core::stages::OutputEvent]) -> Vec<&str> {
+fn ports(events: &[engelfo::stages::OutputEvent]) -> Vec<&str> {
     events.iter().map(|e| e.port.as_str()).collect()
 }
 fn repeated(playback: Playback, named: bool, repeat_count: Option<u64>) -> Stages {

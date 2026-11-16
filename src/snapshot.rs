@@ -5,7 +5,7 @@
 //! format, not an interchange format for Python's runtime snapshots.
 //!
 //! ```
-//! use envelfo_core::{lfo::LFO, snapshot::Snapshot, time::Time};
+//! use engelfo::{lfo::LFO, snapshot::Snapshot, time::Time};
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let definition = LFO::new(Time::ONE)?;
 //! let state = definition.initial(Time::ZERO)?;

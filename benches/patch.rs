@@ -1,4 +1,4 @@
-//! Run with `cargo bench -p envelfo-core --bench patch --locked`.
+//! Run with `cargo bench -p engelfo --bench patch --locked`.
 //! Counting is isolated from timings and from the library's unsafe-free code.
 #![deny(unsafe_op_in_unsafe_fn)]
 
@@ -7,15 +7,15 @@ use std::hint::black_box;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Instant;
 
-use envelfo_core::envelope::{Envelope, Marker, Segment, Start};
-use envelfo_core::lfo::{LFO, Shape};
-use envelfo_core::patch::{
+use engelfo::envelope::{Envelope, Marker, Segment, Start};
+use engelfo::lfo::{LFO, Shape};
+use engelfo::patch::{
     Child, ChildCommand, ChildEvent, Connection, ConnectionAction, Node, Output, Patch, Seconds,
 };
-use envelfo_core::sample_hold::SampleHold;
-use envelfo_core::signal::Operator;
-use envelfo_core::stages::{Body, Stage, Stages};
-use envelfo_core::time::Time;
+use engelfo::sample_hold::SampleHold;
+use engelfo::signal::Operator;
+use engelfo::stages::{Body, Stage, Stages};
+use engelfo::time::Time;
 
 #[global_allocator]
 static ALLOCATOR: CountingAllocator = CountingAllocator;
@@ -265,7 +265,7 @@ fn fanout(probability: f64) -> Patch {
             }),
         });
         connections.push(Connection {
-            source: envelfo_core::patch::Port {
+            source: engelfo::patch::Port {
                 child: "clock".into(),
                 port: "tick".into(),
             },

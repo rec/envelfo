@@ -1,5 +1,5 @@
-use envelfo_core::Error;
-use envelfo_core::time::Time;
+use engelfo::Error;
+use engelfo::time::Time;
 
 #[test]
 fn floor_ceil_absolute_and_modulo_preserve_negative_rational_boundaries() {
@@ -14,7 +14,7 @@ fn floor_ceil_absolute_and_modulo_preserve_negative_rational_boundaries() {
     assert_eq!(Time::from_integer(i64::MAX).ceil(), i64::MAX);
     assert_eq!(
         Time::from_integer(i64::MIN).checked_abs(),
-        Err(envelfo_core::Error::Overflow)
+        Err(engelfo::Error::Overflow)
     );
     assert!(negative.checked_mod(Time::ZERO).is_err());
 }

@@ -1,9 +1,9 @@
 //! Standalone control playback. Hosts supply normalized definitions and time.
 //!
 //! ```
-//! use envelfo_core::lfo::LFO;
-//! use envelfo_core::time::Time;
-//! # fn main() -> Result<(), envelfo_core::Error> {
+//! use engelfo::lfo::LFO;
+//! use engelfo::time::Time;
+//! # fn main() -> Result<(), engelfo::Error> {
 //! let lfo = LFO::new(Time::ONE)?;
 //! let state = lfo.initial(Time::ZERO)?;
 //! assert_eq!(lfo.value(&state, Time::new(1, 4)?)?.value, 1.0);
@@ -15,6 +15,7 @@
 pub mod approach;
 pub mod envelope;
 pub mod lfo;
+pub mod midi;
 pub mod patch;
 mod playback;
 pub mod random;

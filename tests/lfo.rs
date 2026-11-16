@@ -1,6 +1,6 @@
-use envelfo_core::Error;
-use envelfo_core::lfo::{Clock, Command, Driver, LFO, Reset, Shape};
-use envelfo_core::time::Time;
+use engelfo::Error;
+use engelfo::lfo::{Clock, Command, Driver, LFO, Reset, Shape};
+use engelfo::time::Time;
 
 #[test]
 fn marker_queries_follow_commands_and_preserve_snapshots() {

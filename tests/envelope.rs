@@ -1,9 +1,9 @@
-use envelfo_core::envelope::{
+use engelfo::envelope::{
     Envelope, EnvelopeCommand, Initial, Marker, Playback, Retrigger, Segment, Start,
 };
-use envelfo_core::lfo::{Command, Direction};
-use envelfo_core::time::Time;
-use envelfo_core::{Error, Status};
+use engelfo::lfo::{Command, Direction};
+use engelfo::time::Time;
+use engelfo::{Error, Status};
 
 #[test]
 fn release_captures_the_in_flight_level_and_retrigger_policy_is_explicit() {

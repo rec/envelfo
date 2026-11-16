@@ -53,22 +53,14 @@ dependencies = [
 ]
 
 [[package]]
-name = "envelfo-core"
+name = "engelfo"
 version = "0.1.0"
 dependencies = [
+ "meedee",
  "num-rational",
  "serde",
  "serde_json",
  "sha2",
-]
-
-[[package]]
-name = "envelfo-midi"
-version = "0.1.0"
-dependencies = [
- "envelfo-core",
- "meedee",
- "serde_json",
 ]
 
 [[package]]

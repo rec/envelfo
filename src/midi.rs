@@ -5,9 +5,9 @@
 //! any partial/uncertain send. No transport, clock, retry or thread is owned here.
 //! ```
 //! use std::collections::BTreeMap;
-//! use envelfo_core::time::Time;
-//! use envelfo_midi::{Mapper, Mapping, Target};
-//! # fn main() -> Result<(), envelfo_midi::Error> {
+//! use engelfo::time::Time;
+//! use engelfo::midi::{Mapper, Mapping, Target};
+//! # fn main() -> Result<(), engelfo::midi::Error> {
 //! let mapping = Mapping::new("expression".into(),
 //!     Target::ControlChange { channel: 1, controller: 11 },
 //!     0.0, 1.0, 0, None)?;
@@ -26,7 +26,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::Arc;
 
-use envelfo_core::time::Time;
+use crate::time::Time;
 use meedee::messages::{self, Command, PrimitiveMessage};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -101,7 +101,7 @@ pub enum Error {
     Pending,
     Failed,
     WrongBatch,
-    Time(envelfo_core::Error),
+    Time(crate::Error),
     Message(messages::ValueError),
 }
 
@@ -196,7 +196,7 @@ impl Mapper {
         }
         let tokens = if let Some(previous) = self.at {
             if at < previous {
-                return Err(Error::Time(envelfo_core::Error::TimeReversed));
+                return Err(Error::Time(crate::Error::TimeReversed));
             }
             // Cap the elapsed interval before multiplication, so a long silence
             // cannot overflow merely while refilling an already bounded bucket.
@@ -389,8 +389,8 @@ impl Target {
     }
 }
 
-impl From<envelfo_core::Error> for Error {
-    fn from(error: envelfo_core::Error) -> Self {
+impl From<crate::Error> for Error {
+    fn from(error: crate::Error) -> Self {
         Self::Time(error)
     }
 }

@@ -1,4 +1,24 @@
-[workspace]
-members = ["crates/envelfo-core", "crates/envelfo-midi"]
-default-members = ["crates/envelfo-core"]
-resolver = "3"
+[package]
+name = "engelfo"
+version = "0.1.0"
+edition = "2024"
+description = "Exact control playback and caller-driven MIDI mapping"
+license = "MIT"
+publish = false
+
+[features]
+snapshots = ["dep:serde", "dep:serde_json"]
+
+[dependencies]
+num-rational = { version = "0.4", default-features = false, features = ["std"] }
+sha2 = "0.10.9"
+serde = { version = "1", features = ["derive", "rc"], optional = true }
+serde_json = { version = "1", features = ["float_roundtrip"], optional = true }
+meedee = { git = "https://github.com/rec/meedee", branch = "main" }
+
+[dev-dependencies]
+serde_json = { version = "1", features = ["preserve_order"] }
+
+[[bench]]
+name = "patch"
+harness = false

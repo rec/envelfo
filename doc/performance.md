@@ -22,7 +22,7 @@ microbenchmarks, not portable latency promises or allocation-free callback claim
 ## Reproduction
 
 ```sh
-cargo bench -p envelfo-core --bench patch --locked
+cargo bench -p engelfo --bench patch --locked
 ```
 
 The dependency-free harness uses 256 warmup operations, then five timed runs of

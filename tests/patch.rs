@@ -1,16 +1,16 @@
-use envelfo_core::Error;
-use envelfo_core::approach::ExponentialApproach;
-use envelfo_core::envelope::{Envelope, Segment, Start};
-use envelfo_core::lfo::{Command, LFO, Shape};
-use envelfo_core::patch::{
+use engelfo::Error;
+use engelfo::approach::ExponentialApproach;
+use engelfo::envelope::{Envelope, Segment, Start};
+use engelfo::lfo::{Command, LFO, Shape};
+use engelfo::patch::{
     Child, ChildCommand, ChildEvent, ClockMapping, Connection, ConnectionAction, EventOutput, Node,
     Output, Patch, Port, Seconds,
 };
-use envelfo_core::random::{random_word, stream_key};
-use envelfo_core::sample_hold::SampleHold;
-use envelfo_core::signal::Operator;
-use envelfo_core::stages::{Action, Body, Stage, Stages, Transition};
-use envelfo_core::time::Time;
+use engelfo::random::{random_word, stream_key};
+use engelfo::sample_hold::SampleHold;
+use engelfo::signal::Operator;
+use engelfo::stages::{Action, Body, Stage, Stages, Transition};
+use engelfo::time::Time;
 
 #[path = "support/allocations.rs"]
 mod allocations;
@@ -167,7 +167,7 @@ fn prepared_voice_reset_matches_fresh_initialization_without_heap_operations() {
         staged_patch(),
     ] {
         body.connections[0].probability = 0.5;
-        let keys = envelfo_core::patch::StreamKeys {
+        let keys = engelfo::patch::StreamKeys {
             samples: [("held".into(), 123)].into(),
             connections: vec![456],
         };
@@ -321,7 +321,7 @@ fn prepared_storage_matches_allocating_execution_without_heap_operations() {
 #[cfg(feature = "snapshots")]
 #[test]
 fn snapshot_pending_cues_keep_their_wire_format_and_resume_with_prepared_storage() {
-    use envelfo_core::snapshot::Snapshot;
+    use engelfo::snapshot::Snapshot;
     let body = staged_patch();
     let mut state = body
         .initial(Time::ZERO, "bounded", 17, None, &Seconds)
@@ -534,7 +534,7 @@ fn prepared_random_keys_and_host_inputs_preserve_stream_identity() {
         name: "host".into(),
         source: "host".into(),
     });
-    let keys = envelfo_core::patch::StreamKeys {
+    let keys = engelfo::patch::StreamKeys {
         samples: [("held".into(), 123)].into(),
         connections: vec![456],
     };
@@ -1009,7 +1009,7 @@ fn observation_failure_after_routing_rolls_back_streams_and_retained_signals() {
             ));
             body.outputs.push(output("overflow", "overflow"));
         }
-        let keys = envelfo_core::patch::StreamKeys {
+        let keys = engelfo::patch::StreamKeys {
             samples: [("held".into(), 0)].into(),
             connections: vec![0],
         };
@@ -1284,9 +1284,9 @@ impl ClockMapping for Stopped {
 }
 fn observe(
     body: &Patch,
-    state: &mut envelfo_core::patch::PatchState,
+    state: &mut engelfo::patch::PatchState,
     at: Time,
-) -> envelfo_core::patch::PatchAdvance {
+) -> engelfo::patch::PatchAdvance {
     body.advance(state, at, at.checked_add(t(1, 100)).unwrap(), &Seconds)
         .unwrap()
 }
@@ -1307,7 +1307,7 @@ fn clock_patch(action: ConnectionAction) -> Patch {
                 "clock",
                 Node::LFO {
                     body: lfo,
-                    markers: vec![envelfo_core::envelope::Marker {
+                    markers: vec![engelfo::envelope::Marker {
                         name: "tick".into(),
                         position: t(1, 4),
                     }],

@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
-use envelfo_core::time::Time;
-use envelfo_midi::{Error, Mapper, Mapping, Target};
+use engelfo::midi::{Error, Mapper, Mapping, Target};
+use engelfo::time::Time;
 use meedee::messages::PrimitiveMessage;
 use serde_json::Value;
 
@@ -46,7 +46,7 @@ fn values(value: &Value) -> BTreeMap<String, f64> {
 #[test]
 fn shared_wire_vectors_cover_order_quantization_budget_and_delivery_recovery() {
     let document: Value =
-        serde_json::from_str(include_str!("../../../conformance/envelfo-midi.json")).unwrap();
+        serde_json::from_str(include_str!("../conformance/envelfo-midi.json")).unwrap();
     for case in document["cases"].as_array().unwrap() {
         let mappings = case["mappings"]
             .as_array()
@@ -87,7 +87,7 @@ fn shared_wire_vectors_cover_order_quantization_budget_and_delivery_recovery() {
                     "budget" => error == Error::Budget,
                     "pending" => error == Error::Pending,
                     "failed" => error == Error::Failed,
-                    "reversed" => error == Error::Time(envelfo_core::Error::TimeReversed),
+                    "reversed" => error == Error::Time(engelfo::Error::TimeReversed),
                     "missing" => matches!(error, Error::MissingOutput(_)),
                     "range" => matches!(error, Error::InvalidValue(_)),
                     _ => false,

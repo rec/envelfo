@@ -19,7 +19,7 @@ changing its definition. The owning `command` API remains available outside
 real-time processing. Captured resolution never grows prepared buffers.
 Python and Rust share `conformance/captured-envelope.json`. Rust hosts using
 frame clocks set `clock_units_per_second` so rounding occurs in seconds before
-conversion to frame coordinates. Run `cargo test -p envelfo-core --features
+conversion to frame coordinates. Run `cargo test -p engelfo --features
 snapshots` for native conformance and continuation checks.
 
 Envelope segments may have `duration: null`: they hold the incoming level until
@@ -43,7 +43,7 @@ bridges for hit-triggered Envelopes and named expression outputs.
 
 The periodic Envelfo body is `LFO`, with discriminator `kind = "lfo"` and state
 type `LFOState`. This replaces `Cycle` without compatibility aliases. Rust uses
-`envelfo_core::lfo`. The `cycle` event port still names a completed loop traversal;
+`engelfo::lfo`. The `cycle` event port still names a completed loop traversal;
 it is not a body type. Oscillator duty cycles and graph dependency cycles also
 keep their existing meaning.
 
@@ -55,7 +55,7 @@ Patch and Stage children inherit clock and scope without authored overrides.
 `ufor.envelfo.Envelope` is the single envelope model for modulation and voice
 amplitude. There are no `VoiceEnvelope` types or evaluator aliases. The runtime
 uses `EnvelfoEvent`, `EnvelfoState` and `EnvelfoValue`; Rust uses
-`envelfo_core::envelope`. Audio voice retirement and amplitude renderer support
+`engelfo::envelope`. Audio voice retirement and amplitude renderer support
 restrictions belong to enge, not the standalone envelope runtime.
 
 The former low-level `ufor.lfo.LFO`, its state/event/value models and its execution
@@ -176,10 +176,11 @@ including synth, FM, noise and sampler snapshots. Its audio snapshots store the
 shared state under `graphs`; the former per-source execution-state layout is not
 a backwards-compatible serialized snapshot format.
 
-## Standalone Rust core
+## Rust library
 
-`crates/envelfo-core` is a normal Rust library, with no Python, PyO3, NumPy or
-audio dependency. Build and test it directly with `cargo test --workspace`;
+`engelfo` is the repository's single Rust library, with generator execution and
+MIDI mapping in ordinary modules. It has no Python, PyO3, NumPy or audio dependency.
+Build and test it directly with `cargo test`;
 also check optimized overflow behavior with `cargo test --workspace --release`.
 `cargo clippy --workspace --all-targets -- -D warnings` checks the Rust source.
 The tested API example lives in the crate's documentation.
@@ -313,12 +314,12 @@ times and shared Patch state; only signal evaluation becomes floating point.
 
 ### Rust JSON snapshots
 
-Enable the `snapshots` Cargo feature to use `envelfo_core::snapshot::Snapshot`.
+Enable the `snapshots` Cargo feature to use `engelfo::snapshot::Snapshot`.
 It is off by default, so ordinary library builds do not depend on Serde or JSON.
 Each variant bundles a normalized definition and its complete playback state:
 
 ```rust
-use envelfo_core::{lfo::LFO, snapshot::Snapshot, time::Time};
+use engelfo::{lfo::LFO, snapshot::Snapshot, time::Time};
 
 let definition = LFO::new(Time::ONE)?;
 let state = definition.initial(Time::ZERO)?;
@@ -353,7 +354,7 @@ bridge to observe newly triggered expression before note-on.
 
 The [Rust performance audit](doc/performance.md) records repeatable allocation
 and timing benchmarks, measured optimizations, and their limits. Run
-`cargo bench -p envelfo-core --bench patch --locked` to repeat the measurements.
+`cargo bench -p engelfo --bench patch --locked` to repeat the measurements.
 
 Run `uv run pytest` for the reference tests and the language-neutral cases in
 `conformance/envelfo-runtime.json`, `conformance/envelfo-patch.json` and
@@ -370,7 +371,7 @@ and explicit exclusions. No release is created or published by these checks.
 ## Optional MIDI control output
 
 Install `enveLFO[midi]` (`uv sync --extra midi`) for `envelfo.midi`, or select the
-Rust `envelfo-midi` crate. Map observed named values to meedee CC, fine-CC and
+Rust `engelfo::midi` module. Map observed named values to meedee CC, fine-CC and
 RPN/NRPN Set commands with explicit source ranges, integer quantization and
 wire-byte admission limits. The host confirms successful delivery; partial or
 uncertain sends require explicit recovery. The mapper owns no ports, clock or
@@ -378,8 +379,6 @@ scheduler and never advances an enveLFO graph. Existing arpeg bridge observation
 can supply its inputs without another observation or competing expression path.
 See the [MIDI integration contract](doc/midi.md).
 
-The default Rust workspace member remains `envelfo-core` (Rust 1.85). Building
-`envelfo-midi` requires Rust 1.87, CMake/C++20 and native meedee prerequisites;
-Linux additionally needs ALSA development headers and pkg-config. `cargo test
---workspace` now explicitly includes that optional native dependency. The core
-Python install retains no meedee, NumPy or audio-device dependency.
+Rust MIDI mapping is included in `engelfo` and uses meedee. The Python MIDI
+dependency remains an optional extra; the base Python install has no meedee,
+NumPy or audio-device dependency.

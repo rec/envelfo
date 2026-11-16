@@ -1,8 +1,8 @@
-use envelfo_core::Error;
-use envelfo_core::lfo::Command;
-use envelfo_core::random::random_word;
-use envelfo_core::sample_hold::{SampleCommand, SampleHold};
-use envelfo_core::time::Time;
+use engelfo::Error;
+use engelfo::lfo::Command;
+use engelfo::random::random_word;
+use engelfo::sample_hold::{SampleCommand, SampleHold};
+use engelfo::time::Time;
 
 #[test]
 fn only_sampling_draws_a_word_and_cloning_preserves_the_stream() {

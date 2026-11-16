@@ -46,7 +46,7 @@ kind was rejected before its generator was checked.
   vectorized spans, waveform kernels and sample-frame mapping remain audio
   acceleration, not alternate command/event schedulers.
 - Native named Envelopes, LFOs, Stages and retained Patch scheduling use
-  `envelfo-core`. Python Patch scheduling uses `envelfo.patch`. Audio hosts
+  `engelfo`. Python Patch scheduling uses `envelfo.patch`. Audio hosts
   retain scope admission, trigger addresses, minimum hold and retirement.
 - arpeg retains note/rhythm decisions and captured controller ownership. Its
   bridge links the libraries without making either event core depend on the other.
@@ -120,18 +120,19 @@ cargo test --workspace --locked --features snapshots
 cargo test --workspace --locked --release --features snapshots
 cargo clippy --workspace --all-targets --locked --features snapshots -- -D warnings
 uv build
-cargo package --manifest-path crates/envelfo-core/Cargo.toml --locked
-cargo package --manifest-path crates/envelfo-core/Cargo.toml --locked --features snapshots
+cargo build --locked --all-features
+cargo doc --locked --no-deps --all-features
 ```
 
 `.github/workflows/test.yml` runs only when a release is published. It gates
 Linux, Windows and macOS, Python 3.13/3.15, tests against a wheel installed in a
-fresh environment outside the checkout, and standalone Rust package verification.
+fresh environment outside the checkout, and Rust build/documentation verification.
 Rust checks run with snapshots disabled and enabled, including debug/release
-tests and independent package compilation. The enabled shared conformance runner
+tests, builds and documentation. The enabled shared conformance runner
 serializes and reloads every continuation step, not just explicit restore points.
-The full repository tests retain access to the shared fixtures; the published
-crate's build verification is independent of those repository-level test assets.
+The single `engelfo` crate is distributed through Git with `publish = false`;
+its MIDI dependency also comes from Git. Registry packaging is not a release
+check. Repository tests retain access to the shared conformance fixtures.
 Cross-platform results are not claimed until that release workflow runs.
 This audit does not create a tag, publish packages or trigger a release.
 

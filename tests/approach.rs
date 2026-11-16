@@ -1,7 +1,7 @@
-use envelfo_core::approach::ExponentialApproach;
-use envelfo_core::envelope::{Envelope, EnvelopeCommand, Segment};
-use envelfo_core::lfo::Command;
-use envelfo_core::time::Time;
+use engelfo::approach::ExponentialApproach;
+use engelfo::envelope::{Envelope, EnvelopeCommand, Segment};
+use engelfo::lfo::Command;
+use engelfo::time::Time;
 #[path = "support/allocations.rs"]
 mod allocations;
 use allocations::ALLOCATIONS;
@@ -9,7 +9,7 @@ use allocations::ALLOCATIONS;
 #[test]
 fn captured_release_matches_shared_vectors() {
     let vectors: serde_json::Value =
-        serde_json::from_str(include_str!("../../../conformance/captured-envelope.json")).unwrap();
+        serde_json::from_str(include_str!("../conformance/captured-envelope.json")).unwrap();
     let source = &vectors["stage"];
     let approach = ExponentialApproach {
         clock_units_per_second: Time::ONE,
@@ -76,7 +76,7 @@ fn captured_release_matches_shared_vectors() {
         );
         #[cfg(feature = "snapshots")]
         {
-            use envelfo_core::snapshot::Snapshot;
+            use engelfo::snapshot::Snapshot;
             let saved = Snapshot::Envelope {
                 definition: body.clone(),
                 state: state.clone(),
@@ -235,6 +235,6 @@ fn prepared_commands_preserve_capture_clones_and_transactionality_without_heap_o
     );
     let operations = ALLOCATIONS.replace(None).unwrap();
     assert_eq!(operations, 0);
-    assert_eq!(result, Err(envelfo_core::Error::Capacity));
+    assert_eq!(result, Err(engelfo::Error::Capacity));
     assert_eq!(actual, before);
 }

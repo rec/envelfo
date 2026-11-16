@@ -1,10 +1,10 @@
-use envelfo_core::Status;
-use envelfo_core::envelope::{Envelope, EnvelopeCommand, Initial, Marker, Playback, Segment};
-use envelfo_core::lfo::{Clock, Command, Driver, LFO, Reset, Shape};
-use envelfo_core::random::random_word;
-use envelfo_core::stages::{Action, Body, Event, Stage, StageCommand, Stages, Transition};
-use envelfo_core::time::Time;
-use envelfo_core::{patch, signal};
+use engelfo::Status;
+use engelfo::envelope::{Envelope, EnvelopeCommand, Initial, Marker, Playback, Segment};
+use engelfo::lfo::{Clock, Command, Driver, LFO, Reset, Shape};
+use engelfo::random::random_word;
+use engelfo::stages::{Action, Body, Event, Stage, StageCommand, Stages, Transition};
+use engelfo::time::Time;
+use engelfo::{patch, signal};
 use serde_json::Value;
 
 // Exercise the same traces using actual disk-format continuation when enabled.
@@ -12,7 +12,7 @@ macro_rules! continuation {
     ($kind:ident, $definition:expr, $state:expr) => {{
         #[cfg(feature = "snapshots")]
         {
-            use envelfo_core::snapshot::Snapshot;
+            use engelfo::snapshot::Snapshot;
             let snapshot = Snapshot::$kind {
                 definition: $definition.clone(),
                 state: $state.clone(),
@@ -34,8 +34,8 @@ macro_rules! continuation {
 #[test]
 fn patch_orchestration_matches_shared_observation_and_delivery_traces() {
     for text in [
-        include_str!("../../../conformance/envelfo-patch.json"),
-        include_str!("../../../conformance/envelfo-host.json"),
+        include_str!("../conformance/envelfo-patch.json"),
+        include_str!("../conformance/envelfo-host.json"),
     ] {
         let corpus: Value = serde_json::from_str(text).unwrap();
         for case in corpus["cases"].as_array().unwrap() {
@@ -140,7 +140,7 @@ fn bodies_match_every_shared_trace() {
                     assert!(step["events"].is_null());
                     if !step["runtime"].is_null() {
                         assert_eq!(step["runtime"], serde_json::json!({"phase": "release"}));
-                        assert_eq!(state.phase(), envelfo_core::envelope::Phase::Release);
+                        assert_eq!(state.phase(), engelfo::envelope::Phase::Release);
                     }
                 }
             }
@@ -243,10 +243,10 @@ fn splitmix_words_match_shared_vectors() {
 #[test]
 fn stream_identities_match_shared_sha256_vectors() {
     let vectors: Value =
-        serde_json::from_str(include_str!("../../../conformance/envelfo-streams.json")).unwrap();
+        serde_json::from_str(include_str!("../conformance/envelfo-streams.json")).unwrap();
     for vector in vectors["vectors"].as_array().unwrap() {
         assert_eq!(
-            envelfo_core::random::stream_key(
+            engelfo::random::stream_key(
                 vector["seed"].as_u64().unwrap(),
                 vector["identity"].as_str().unwrap()
             ),
@@ -263,7 +263,7 @@ fn random_stream_counter_wraps_as_specified() {
 }
 
 fn corpus() -> Value {
-    serde_json::from_str(include_str!("../../../conformance/envelfo-runtime.json")).unwrap()
+    serde_json::from_str(include_str!("../conformance/envelfo-runtime.json")).unwrap()
 }
 
 fn rational(value: &Value) -> Time {
@@ -362,7 +362,7 @@ fn command(event: &Value) -> Command {
     }
 }
 
-fn check_value(value: envelfo_core::lfo::Value, step: &Value) {
+fn check_value(value: engelfo::lfo::Value, step: &Value) {
     assert!(
         (value.value - step["expected"]["value"].as_f64().unwrap()).abs() <= 1e-12,
         "{value:?} at {}",
@@ -423,7 +423,7 @@ fn envelope(body: &Value) -> Envelope {
     };
     envelope.release = segments("release");
     if body["start"] == "event" {
-        envelope.start = envelfo_core::envelope::Start::Event;
+        envelope.start = engelfo::envelope::Start::Event;
     }
     envelope.markers = markers(body);
     envelope.playback = match body["playback"].as_str().unwrap_or("once") {
@@ -523,12 +523,10 @@ fn patch_definition(body: &Value) -> patch::Patch {
                     },
                     "envelope" => patch::Node::Envelope(envelope(body)),
                     "stages" => patch::Node::Stages(stages(body)),
-                    "sample_hold" => {
-                        patch::Node::SampleHold(envelfo_core::sample_hold::SampleHold {
-                            minimum: body["minimum"].as_f64().unwrap(),
-                            maximum: body["maximum"].as_f64().unwrap(),
-                        })
-                    }
+                    "sample_hold" => patch::Node::SampleHold(engelfo::sample_hold::SampleHold {
+                        minimum: body["minimum"].as_f64().unwrap(),
+                        maximum: body["maximum"].as_f64().unwrap(),
+                    }),
                     "affine" => patch::Node::Signal(signal::Operator::Affine {
                         input: body["input"].as_str().unwrap().into(),
                         scale: body["scale"].as_f64().unwrap_or(1.0),
@@ -626,7 +624,7 @@ struct HostClock<'a> {
 }
 
 impl patch::ClockMapping for HostClock<'_> {
-    fn local_time(&self, child: &str, seconds: Time) -> Result<Time, envelfo_core::Error> {
+    fn local_time(&self, child: &str, seconds: Time) -> Result<Time, engelfo::Error> {
         let body = &self.definition["envelfos"][child];
         if body["clock"] != "beats" {
             return Ok(seconds);
@@ -670,7 +668,7 @@ impl patch::ClockMapping for HostClock<'_> {
         Ok(elapsed)
     }
 
-    fn host_time(&self, child: &str, local: Time) -> Result<Option<Time>, envelfo_core::Error> {
+    fn host_time(&self, child: &str, local: Time) -> Result<Option<Time>, engelfo::Error> {
         if self.definition["envelfos"][child]["clock"] != "beats" {
             return Ok(Some(local));
         }
