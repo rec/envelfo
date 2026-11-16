@@ -1,8 +1,14 @@
 use std::collections::BTreeMap;
 
-use engelfo::midi::{Error, Mapper, Mapping, Target};
+use engelfo::midi::{Error, Mapper, Mapping, MidiMessage, Target};
 use engelfo::time::Time;
-use meedee::messages::PrimitiveMessage;
+use middy::messages::PrimitiveMessage;
+
+#[test]
+fn message_expansion_reports_an_unassigned_channel() {
+    let message = MidiMessage::ControlChange(middy::messages::ControlChange::new(11, 64).unwrap());
+    assert!(matches!(message.expand(), Err(Error::Message(_))));
+}
 use serde_json::Value;
 
 fn integer(value: &Value, name: &str) -> u16 {
@@ -99,8 +105,8 @@ fn shared_wire_vectors_cover_order_quantization_budget_and_delivery_recovery() {
             let wire: Vec<Vec<u8>> = batch
                 .messages()
                 .iter()
-                .flat_map(|m| m.expand())
-                .map(|m| m.encode())
+                .flat_map(|m| m.expand().unwrap())
+                .map(|m| m.encode().unwrap())
                 .collect();
             assert_eq!(
                 serde_json::to_value(&wire).unwrap(),
@@ -162,7 +168,10 @@ fn bad_values_do_not_admit_a_batch_or_change_the_delivery_cache() {
     let batch = mapper
         .prepare(Time::ZERO, &BTreeMap::from([("x".into(), 0.5)]))
         .unwrap();
-    assert_eq!(batch.messages()[0].expand()[0].encode(), vec![176, 11, 64]);
+    assert_eq!(
+        batch.messages()[0].expand().unwrap()[0].encode().unwrap(),
+        vec![176, 11, 64]
+    );
     mapper.confirm(&batch).unwrap();
 }
 

@@ -7,7 +7,7 @@ from fractions import Fraction
 from math import isfinite
 from typing import Literal, Self
 
-from meedee import codecs, messages
+from middy import codecs, messages
 from pydantic import BaseModel, Field, model_validator
 
 
@@ -77,12 +77,7 @@ class Batch(BaseModel, frozen=True):
     """Ordered primitives/commands. Confirmation accepts only the original batch."""
 
     at: Fraction
-    messages: list[
-        messages.ControlChange
-        | messages.ControlChange14
-        | messages.RpnSet
-        | messages.NrpnSet
-    ]
+    messages: list[messages.ControlChange | messages.ParameterSet]
     wire_bytes: int
 
     model_config = {'extra': 'forbid', 'strict': True, 'arbitrary_types_allowed': True}
@@ -133,12 +128,7 @@ class Mapper:
         if self._at is not None and at < self._at:
             raise ValueError('MIDI observation time must not move backward')
         quantized: list[int] = []
-        outgoing: list[
-            messages.ControlChange
-            | messages.ControlChange14
-            | messages.RpnSet
-            | messages.NrpnSet
-        ] = []
+        outgoing: list[messages.ControlChange | messages.ParameterSet] = []
         for i, mapping in enumerate(self._mappings):
             if mapping.output not in values:
                 raise ValueError(f'missing mapped output: {mapping.output}')
@@ -219,41 +209,33 @@ def _destination(
 
 def _message(
     target: CCTarget | FineCCTarget | RpnTarget | NrpnTarget, value: int
-) -> (
-    messages.ControlChange
-    | messages.ControlChange14
-    | messages.RpnSet
-    | messages.NrpnSet
-):
+) -> messages.ControlChange | messages.ParameterSet:
     if isinstance(target, CCTarget):
         return messages.ControlChange(
             channel=target.channel, controller=target.controller, value=value
         )
     if isinstance(target, FineCCTarget):
-        return messages.ControlChange14(
-            channel=target.channel, controller=target.controller, value=value
+        return messages.ControlChange(
+            channel=target.channel,
+            controller=target.controller,
+            value=value,
+            resolution=14,
         )
     if isinstance(target, RpnTarget):
-        return messages.RpnSet(
+        return messages.ParameterSet(
             channel=target.channel,
             parameter=target.parameter,
             value=value,
             resolution=target.resolution,
         )
-    return messages.NrpnSet(
+    return messages.ParameterSet(
         channel=target.channel,
         parameter=target.parameter,
         value=value,
         resolution=target.resolution,
+        family='nrpn',
     )
 
 
-def _wire_bytes(
-    message: messages.ControlChange
-    | messages.ControlChange14
-    | messages.RpnSet
-    | messages.NrpnSet,
-) -> int:
-    if isinstance(message, messages.ControlChange):
-        return len(codecs.encode(message))
+def _wire_bytes(message: messages.ControlChange | messages.ParameterSet) -> int:
     return sum(len(codecs.encode(m)) for m in codecs.expand(message))

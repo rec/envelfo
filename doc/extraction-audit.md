@@ -46,7 +46,9 @@ kind was rejected before its generator was checked.
   vectorized spans, waveform kernels and sample-frame mapping remain audio
   acceleration, not alternate command/event schedulers.
 - Native named Envelopes, LFOs, Stages and retained Patch scheduling use
-  `engelfo`. Python Patch scheduling uses `envelfo.patch`. Audio hosts
+  the execution library now named `engelfo`. Existing consumer pins may still
+  refer to its former `envelfo-core` package name. Python Patch scheduling uses
+  `envelfo.patch`. Audio hosts
   retain scope admission, trigger addresses, minimum hold and retirement.
 - arpeg retains note/rhythm decisions and captured controller ownership. Its
   bridge links the libraries without making either event core depend on the other.
@@ -108,7 +110,7 @@ claim hardware, allocation-free callback, or physical MIDI timing validation.
 Reproduce the source checks with:
 
 ```sh
-uv sync --frozen
+uv sync --frozen --extra midi --no-editable
 uv run --no-sync pytest
 uv run --no-sync ruff check --select B,E,F,I envelfo test
 uv run --no-sync ruff format --check envelfo test

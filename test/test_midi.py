@@ -7,11 +7,9 @@ from typing import cast
 
 import pytest
 
-pytest.importorskip(
-    'meedee', reason='install enveLFO[midi] for the optional MIDI tests'
-)
+pytest.importorskip('middy', reason='install enveLFO[midi] for the optional MIDI tests')
 
-from meedee import codecs, messages
+from middy import codecs, messages
 from pydantic import BaseModel, ValidationError
 from ufor import envelfo
 
@@ -75,11 +73,7 @@ def test_mapper_matches_shared_wire_and_delivery_contract(case: Case) -> None:
             continue
         batch = mapper.prepare(at=at, values=step.values)
         wire = [
-            list(codecs.encode(p))
-            for m in batch.messages
-            for p in (
-                [m] if isinstance(m, messages.ControlChange) else codecs.expand(m)
-            )
+            list(codecs.encode(p)) for m in batch.messages for p in codecs.expand(m)
         ]
         assert wire == step.wire
         assert batch.wire_bytes == sum(len(m) for m in wire)

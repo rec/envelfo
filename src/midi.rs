@@ -1,4 +1,4 @@
-//! Optional MIDI realization of already observed enveLFO named outputs.
+//! MIDI realization of already observed enveLFO named outputs.
 //!
 //! The host advances graphs, chooses observation times and sends returned values
 //! in declaration order. Confirm only after every send succeeds; report_loss on
@@ -27,7 +27,8 @@ use std::fmt;
 use std::sync::Arc;
 
 use crate::time::Time;
-use meedee::messages::{self, Command, PrimitiveMessage};
+use middy::controls::ParameterFamily;
+use middy::messages::{self, Command, PrimitiveMessage};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Target {
@@ -64,9 +65,9 @@ pub struct Mapping {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum MidiMessage {
     ControlChange(messages::ControlChange),
-    ControlChange14(messages::ControlChange14),
-    RpnSet(messages::RpnSet),
-    NrpnSet(messages::NrpnSet),
+    ControlChange14(messages::ControlChange),
+    RpnSet(messages::ParameterSet),
+    NrpnSet(messages::ParameterSet),
 }
 
 #[derive(Debug)]
@@ -164,7 +165,7 @@ impl Mapper {
                 return Err(Error::Invalid("MIDI destinations must be distinct"));
             }
             initial_bytes = initial_bytes
-                .checked_add(mapping.target.message(0)?.wire_bytes())
+                .checked_add(mapping.target.message(0)?.wire_bytes()?)
                 .ok_or(Error::Invalid("initial batch is too large"))?;
         }
         if i64::try_from(initial_bytes).map_err(|_| Error::Budget)? > burst_bytes {
@@ -225,7 +226,7 @@ impl Mapper {
             if self.values.as_ref().is_none_or(|v| v[i] != value) {
                 let message = mapping.target.message(value)?;
                 size = size
-                    .checked_add(message.wire_bytes())
+                    .checked_add(message.wire_bytes()?)
                     .ok_or(Error::Budget)?;
                 outgoing.push(message);
             }
@@ -301,19 +302,19 @@ impl Batch {
 
 impl MidiMessage {
     /// Ordered primitive messages for testing, accounting or device-free hosts.
-    /// A transport host should send compound variants with send_command(),
-    /// retaining meedee's connection-local serialization and failure progress.
-    pub fn expand(&self) -> Vec<messages::AnyMessage> {
-        match self {
-            Self::ControlChange(m) => vec![messages::AnyMessage::ControlChange(m.clone())],
-            Self::ControlChange14(m) => m.expand(),
-            Self::RpnSet(m) => m.expand(),
-            Self::NrpnSet(m) => m.expand(),
-        }
+    /// A transport host should send each middy value intact, retaining
+    /// connection-local serialization and failure progress.
+    pub fn expand(&self) -> Result<Vec<messages::AnyMessage>, Error> {
+        Ok(match self {
+            Self::ControlChange(m) | Self::ControlChange14(m) => m.expand()?,
+            Self::RpnSet(m) | Self::NrpnSet(m) => m.expand()?,
+        })
     }
 
-    fn wire_bytes(&self) -> usize {
-        self.expand().iter().map(|m| m.encode().len()).sum()
+    fn wire_bytes(&self) -> Result<usize, Error> {
+        self.expand()?
+            .iter()
+            .try_fold(0, |n, m| Ok(n + m.encode()?.len()))
     }
 }
 
@@ -352,39 +353,37 @@ impl Target {
             Self::ControlChange {
                 channel,
                 controller,
-            } => MidiMessage::ControlChange(messages::ControlChange::new(
-                i64::from(channel),
-                i64::from(controller),
-                value,
-            )?),
+            } => MidiMessage::ControlChange(
+                messages::ControlChange::new(i64::from(controller), value)?
+                    .with_channel(i64::from(channel))?,
+            ),
             Self::ControlChange14 {
                 channel,
                 controller,
-            } => MidiMessage::ControlChange14(messages::ControlChange14::new(
-                i64::from(channel),
-                i64::from(controller),
-                value,
-            )?),
+            } => MidiMessage::ControlChange14(
+                messages::ControlChange::new_with_resolution(i64::from(controller), value, 14)?
+                    .with_channel(i64::from(channel))?,
+            ),
             Self::Rpn {
                 channel,
                 parameter,
                 resolution,
-            } => MidiMessage::RpnSet(messages::RpnSet::new(
-                i64::from(channel),
-                i64::from(parameter),
-                value,
-                i64::from(resolution),
-            )?),
+            } => MidiMessage::RpnSet(
+                messages::ParameterSet::new(i64::from(parameter), value)?
+                    .with_resolution(i64::from(resolution))?
+                    .with_channel(i64::from(channel))?,
+            ),
             Self::Nrpn {
                 channel,
                 parameter,
                 resolution,
-            } => MidiMessage::NrpnSet(messages::NrpnSet::new(
-                i64::from(channel),
-                i64::from(parameter),
-                value,
-                i64::from(resolution),
-            )?),
+            } => MidiMessage::NrpnSet(
+                messages::ParameterSet::new(0, value)?
+                    .with_family(ParameterFamily::Nrpn)?
+                    .with_parameter(i64::from(parameter))?
+                    .with_resolution(i64::from(resolution))?
+                    .with_channel(i64::from(channel))?,
+            ),
         })
     }
 }

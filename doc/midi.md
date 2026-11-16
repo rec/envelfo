@@ -1,10 +1,10 @@
 # MIDI output from named observations
 
 The optional Python `envelfo.midi` module and Rust `engelfo::midi` module map already
-observed named values to meedee MIDI 1.0 messages. They do not acquire time,
+observed named values to middy MIDI 1.0 messages. They do not acquire time,
 advance a Patch, send MIDI, own connections, or start threads. Observation times
 and delivery remain host responsibilities. Base Python enveLFO imports remain
-free of meedee; the single Rust `engelfo` crate includes MIDI mapping.
+free of middy; the single Rust `engelfo` crate includes MIDI mapping.
 
 Install Python support with `uv sync --extra midi`. Rust uses the MIDI dependency
 declared in the root Cargo manifest. No CLI or audio-device host is added.
@@ -30,7 +30,7 @@ clients or applications; CC and fine-CC targets can overlap on the wire.
 Channels are 1–16. Ordinary controller IDs are 0–127; fine-CC base controllers
 are 0–31. RPN parameter 16383 is reserved for null selection; NRPN 16383 remains
 usable. RPN/NRPN Set commands select afresh and release with RPN null, using
-meedee's existing ordered expansion. No interpretation of vendor NRPN meanings
+middy's existing ordered expansion. No interpretation of vendor NRPN meanings
 is attempted. UMP and increment/decrement targets are outside this slice.
 
 Destination `minimum` defaults to zero; `maximum=None` uses the target's full
@@ -47,7 +47,6 @@ suppressed, and only after the host confirms a successful send.
 
 ```python
 from fractions import Fraction
-from meedee import codecs, messages
 from envelfo.midi import CCTarget, Mapper, Mapping
 
 mapper = Mapper(
@@ -67,10 +66,7 @@ batch = mapper.prepare(at=Fraction(1, 4), values={"expression": 0.5})
 completed = False
 try:
     for message in batch.messages:
-        if isinstance(message, messages.ControlChange):
-            connection.send(codecs.encode(message))  # caller-owned meedee connection
-        else:
-            connection.send_command(message)
+        connection.send(message)  # caller-owned middy output
     mapper.confirm(batch)
     completed = True
 finally:
@@ -83,14 +79,18 @@ Pass the original batch to `confirm`. A batch with no changed messages still
 requires confirmation, advancing the accepted admission time without byte cost.
 Do not alter the batch's list of messages. Confirmation rejects an altered list,
 a copied/foreign batch, or a stale batch. It does not prove instrument receipt:
-a successful backend send means acceptance under meedee's transport contract.
+a successful backend send means acceptance under middy's transport contract.
 
 Rust uses the same flow with `Mapper::prepare(at: Time, values: &BTreeMap<...>)`
 and `Mapper::confirm(&batch)`. `batch.messages()` contains `MidiMessage` variants
-wrapping meedee's immutable primitive/command values. Match those variants to
-`OutputConnection::send` or `send_command`; keep each compound command intact.
-`MidiMessage::expand()` exposes primitive order for device-free realization or
-inspection. Time uses enveLFO's existing checked signed-64-bit rational type;
+wrapping middy's immutable primitive/command values. Match those variants to
+middy's output API; keep each compound command intact.
+`MidiMessage::expand()` returns a `Result` exposing primitive order for
+device-free realization or inspection. Fine CC uses middy's `ControlChange` with
+resolution 14; RPN/NRPN use `ParameterSet` with an explicit family. Python batches
+contain those two middy value types. Rust retains its four logical target variants
+with those payloads. Unassigned channels and other middy encoding errors propagate
+as errors. Time uses enveLFO's existing checked signed-64-bit rational type;
 arithmetic overflow is an explicit error. Python uses exact `Fraction` seconds.
 See the crate documentation for a compiled public API example.
 
@@ -167,10 +167,12 @@ For authorized macOS qualification, invoke this as a standalone command:
 uv run --frozen --extra midi pytest -q -s -n 0 test/qualification/midi_output.py
 ```
 
-Each case has a 45-second outer deadline. Both isolated and in-process cases
-passed locally: exact ordered CC/fine-CC/RPN/NRPN delivery, confirmed suppression
-and explicit send failure after caller-owned close. Endpoints are uniquely named
-and test-owned. No physical devices, audio playback, tuning or reset messages are
+Each case has a 45-second outer deadline. The qualification adapter now uses
+middy's `raw=True` input, `run_in_subprocess` setting and unified `send` method.
+The earlier isolated/in-process qualification used meedee; it does not qualify
+this middy migration. Re-run only when native qualification is authorized.
+Endpoints are uniquely named and test-owned. No physical devices, audio playback,
+tuning or reset messages are
 used. Linux/Windows native delivery and physical-device qualification remain open.
 Release CI adds device-free MIDI checks on Linux, Windows and macOS, without
 changing the release-only workflow trigger.

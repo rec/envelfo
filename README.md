@@ -185,6 +185,11 @@ also check optimized overflow behavior with `cargo test --workspace --release`.
 `cargo clippy --workspace --all-targets -- -D warnings` checks the Rust source.
 The tested API example lives in the crate's documentation.
 
+The crate is distributed through Git with `publish = false`. Rust consumers use
+`engelfo` in Cargo dependencies and imports; MIDI mapping is `engelfo::midi`.
+Existing consumers pinned to the former crate names need an explicit dependency
+and import update when adopting this revision.
+
 `LFO::new(rate)` uses the existing LFO defaults. Pass exact positions in
 the LFO's declared seconds/beat clock; a transport-position LFO receives
 song beats directly. Hosts normalize authored quantities and supply clocks.
@@ -371,7 +376,7 @@ and explicit exclusions. No release is created or published by these checks.
 ## Optional MIDI control output
 
 Install `enveLFO[midi]` (`uv sync --extra midi`) for `envelfo.midi`, or select the
-Rust `engelfo::midi` module. Map observed named values to meedee CC, fine-CC and
+Rust `engelfo::midi` module. Map observed named values to middy CC, fine-CC and
 RPN/NRPN Set commands with explicit source ranges, integer quantization and
 wire-byte admission limits. The host confirms successful delivery; partial or
 uncertain sends require explicit recovery. The mapper owns no ports, clock or
@@ -379,6 +384,6 @@ scheduler and never advances an enveLFO graph. Existing arpeg bridge observation
 can supply its inputs without another observation or competing expression path.
 See the [MIDI integration contract](doc/midi.md).
 
-Rust MIDI mapping is included in `engelfo` and uses meedee. The Python MIDI
-dependency remains an optional extra; the base Python install has no meedee,
+Rust MIDI mapping is included in `engelfo` and uses middy. The Python MIDI
+dependency remains an optional extra; the base Python install has no middy,
 NumPy or audio-device dependency.

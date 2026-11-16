@@ -12,7 +12,7 @@ from time import monotonic
 from uuid import uuid4
 
 import pytest
-from meedee import codecs, events, messages, midi
+from middy import codecs, events, midi
 
 from envelfo.midi import CCTarget, FineCCTarget, Mapper, Mapping, NrpnTarget, RpnTarget
 
@@ -65,24 +65,21 @@ def exercise_output(isolated: bool) -> None:
     )
     with ExitStack() as stack:
         sink = stack.enter_context(
-            midi.Input(isolated=isolated).create_virtual(name, receive)
+            midi.Input(raw=True, run_in_subprocess=isolated).create_virtual(
+                name, receive
+            )
         )
-        output = midi.Output(isolated=isolated)
+        output = midi.Output(run_in_subprocess=isolated)
         port = next(p for p in output.ports() if p.name == name)
         connection = stack.enter_context(output.connect(port))
         expected = bytearray()
         for at, level in enumerate([0.0, 0.5, 1.0]):
             batch = mapper.prepare(at=Fraction(at), values={'level': level})
             for message in batch.messages:
-                if isinstance(message, messages.ControlChange):
-                    packet = codecs.encode(message)
-                    expected.extend(packet)
-                    connection.send(packet)
-                else:
-                    expected.extend(
-                        b''.join(codecs.encode(p) for p in codecs.expand(message))
-                    )
-                    connection.send_command(message)
+                expected.extend(
+                    b''.join(codecs.encode(p) for p in codecs.expand(message))
+                )
+                connection.send(message)
             mapper.confirm(batch)
         observed = bytearray()
         deadline = monotonic() + 5

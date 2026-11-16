@@ -3,7 +3,7 @@ revision = 3
 requires-python = ">=3.13"
 
 [options]
-exclude-newer = "2026-11-07T14:53:31.056693Z"
+exclude-newer = "2026-11-09T15:12:45.091907Z"
 exclude-newer-span = "P1W"
 
 [[package]]
@@ -43,7 +43,7 @@ dependencies = [
 
 [package.optional-dependencies]
 midi = [
-    { name = "meedee" },
+    { name = "middy" },
 ]
 
 [package.dev-dependencies]
@@ -58,8 +58,8 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "meedee", marker = "extra == 'midi'", git = "https://github.com/rec/meedee?branch=main" },
-    { name = "ufor", git = "https://github.com/rec/ufor?rev=d9a0a5cdaf7ecafc476452a29808b9358113dcde" },
+    { name = "middy", marker = "extra == 'midi'", git = "ssh://git@github.com/rec/middy.git?rev=50049c0c02f137fc312c324cee8271364f4a0e61" },
+    { name = "ufor", git = "https://github.com/rec/ufor?branch=main" },
 ]
 provides-extras = ["midi"]
 
@@ -116,9 +116,14 @@ wheels = [
 ]
 
 [[package]]
-name = "meedee"
+name = "middy"
 version = "0.2.0"
-source = { git = "https://github.com/rec/meedee?branch=main#28b68ba3048607d4f0f6c766130dfc71e07e05a8" }
+source = { git = "ssh://git@github.com/rec/middy.git?rev=50049c0c02f137fc312c324cee8271364f4a0e61#50049c0c02f137fc312c324cee8271364f4a0e61" }
+dependencies = [
+    { name = "pydantic" },
+    { name = "reccy" },
+    { name = "ufor" },
+]
 
 [[package]]
 name = "packaging"
@@ -422,7 +427,7 @@ wheels = [
 [[package]]
 name = "ufor"
 version = "0.2.0"
-source = { git = "https://github.com/rec/ufor?rev=d9a0a5cdaf7ecafc476452a29808b9358113dcde#d9a0a5cdaf7ecafc476452a29808b9358113dcde" }
+source = { git = "https://github.com/rec/ufor?branch=main#eca5daf2ebc4ba915c848635fd9c32b5a638c58b" }
 dependencies = [
     { name = "pydantic" },
     { name = "reccy" },
