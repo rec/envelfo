@@ -14,7 +14,7 @@ num-rational = { version = "0.4", default-features = false, features = ["std"] }
 sha2 = "0.10.9"
 serde = { version = "1", features = ["derive", "rc"], optional = true }
 serde_json = { version = "1", features = ["float_roundtrip"], optional = true }
-middy = { git = "ssh://git@github.com/rec/middy.git", rev = "50049c0c02f137fc312c324cee8271364f4a0e61" }
+middy = { git = "ssh://git@github.com/rec/middy.git", rev = "de70dfaf194b920c82903e9c68f7c5dd1e4290ad" }
 
 [dev-dependencies]
 serde_json = { version = "1", features = ["preserve_order"] }

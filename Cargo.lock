@@ -122,7 +122,7 @@ checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 [[package]]
 name = "middy"
 version = "0.2.0"
-source = "git+ssh://git@github.com/rec/middy.git?rev=50049c0c02f137fc312c324cee8271364f4a0e61#50049c0c02f137fc312c324cee8271364f4a0e61"
+source = "git+ssh://git@github.com/rec/middy.git?rev=de70dfaf194b920c82903e9c68f7c5dd1e4290ad#de70dfaf194b920c82903e9c68f7c5dd1e4290ad"
 
 [[package]]
 name = "num-bigint"

@@ -58,7 +58,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "middy", marker = "extra == 'midi'", git = "ssh://git@github.com/rec/middy.git?rev=50049c0c02f137fc312c324cee8271364f4a0e61" },
+    { name = "middy", marker = "extra == 'midi'", git = "ssh://git@github.com/rec/middy.git?rev=de70dfaf194b920c82903e9c68f7c5dd1e4290ad" },
     { name = "ufor", git = "https://github.com/rec/ufor?branch=main" },
 ]
 provides-extras = ["midi"]
@@ -117,8 +117,8 @@ wheels = [
 
 [[package]]
 name = "middy"
-version = "0.2.0"
-source = { git = "ssh://git@github.com/rec/middy.git?rev=50049c0c02f137fc312c324cee8271364f4a0e61#50049c0c02f137fc312c324cee8271364f4a0e61" }
+version = "0.3.0"
+source = { git = "ssh://git@github.com/rec/middy.git?rev=de70dfaf194b920c82903e9c68f7c5dd1e4290ad#de70dfaf194b920c82903e9c68f7c5dd1e4290ad" }
 dependencies = [
     { name = "pydantic" },
     { name = "reccy" },

@@ -30,7 +30,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.uv.sources]
-middy = { git = "ssh://git@github.com/rec/middy.git", rev = "50049c0c02f137fc312c324cee8271364f4a0e61" }
+middy = { git = "ssh://git@github.com/rec/middy.git", rev = "de70dfaf194b920c82903e9c68f7c5dd1e4290ad" }
 ufor = { git = "https://github.com/rec/ufor", branch = "main" }
 reccy = { git = "https://github.com/rec/reccy.git", branch = "main" }
 
