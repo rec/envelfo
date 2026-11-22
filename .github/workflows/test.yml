@@ -7,6 +7,12 @@ on:
 permissions:
   contents: read
 
+env:
+  # Public SSH-pinned dependencies need no release-runner SSH credentials.
+  GIT_CONFIG_COUNT: "1"
+  GIT_CONFIG_KEY_0: url.https://github.com/.insteadOf
+  GIT_CONFIG_VALUE_0: ssh://git@github.com/
+
 jobs:
   python:
     runs-on: ${{ matrix.os }}
@@ -21,10 +27,6 @@ jobs:
         shell: bash
     env:
       UV_PYTHON: ${{ matrix.python }}
-      # Public SSH-pinned dependencies need no release-runner SSH credentials.
-      GIT_CONFIG_COUNT: "1"
-      GIT_CONFIG_KEY_0: url.https://github.com/.insteadOf
-      GIT_CONFIG_VALUE_0: ssh://git@github.com/
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
@@ -64,6 +66,8 @@ jobs:
   rust:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
+    env:
+      CARGO_NET_GIT_FETCH_WITH_CLI: "true"
     defaults:
       run:
         shell: bash
